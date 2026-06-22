@@ -1,0 +1,9 @@
+name: recommendation-delay
+
+service: recommendationservice
+
+fault: latency
+
+delay_ms: 200
+
+traffic: medium

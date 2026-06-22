@@ -1,0 +1,7 @@
+name: baseline
+
+traffic: medium
+
+duration: 10m
+
+fault: none
