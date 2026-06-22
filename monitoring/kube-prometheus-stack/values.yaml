@@ -1,0 +1,50 @@
+
+# We don't need alerting
+alertmanager:
+  enabled: false
+
+# Disable default alerting rules 
+defaultRules:
+  create: false
+
+grafana:
+  enabled: true
+
+  adminPassword: admin
+
+  persistence:
+    enabled: false
+
+prometheus:
+
+  service:
+    type: ClusterIP
+
+  prometheusSpec:
+
+    scrapeInterval: 5s
+    evaluationInterval: 5s
+
+    retention: 7d
+
+    enableAdminAPI: true
+
+    storageSpec: {}
+
+    resources:
+      requests:
+        cpu: 500m
+        memory: 1Gi
+
+      limits:
+        cpu: "1"
+        memory: 2Gi
+
+kubeStateMetrics:
+  enabled: true
+
+nodeExporter:
+  enabled: true
+
+prometheusOperator:
+  enabled: true

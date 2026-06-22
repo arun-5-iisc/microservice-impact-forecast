@@ -1,0 +1,6 @@
+# Project-local overrides for Online Boutique.
+# Keep the frontend internal so it is accessed with kubectl port-forward.
+frontend:
+  externalService: false
+googleCloudOperations:
+  tracing: true

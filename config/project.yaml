@@ -1,5 +1,9 @@
-online_boutique_path: /home/<user>/Projects/online-boutique
-
 cluster_name: failure-forecast
 
 namespace: online-boutique
+
+monitoring_namespace: monitoring
+
+dataset_path: dataset/raw
+
+experiment_path: experiments

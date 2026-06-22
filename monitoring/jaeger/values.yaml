@@ -1,0 +1,14 @@
+provisionDataStore:
+  cassandra: false
+
+storage:
+  type: memory
+
+collector:
+  enabled: true
+
+query:
+  enabled: true
+
+agent:
+  enabled: false
