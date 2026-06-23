@@ -177,19 +177,20 @@ def _lookup(key):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# GCS upload placeholder
+# GCS upload
 # ─────────────────────────────────────────────────────────────────────────────
 
+GCS_BUCKET = "ff-dataset-bucket"
+
+
 def _upload_to_gcs(exp_dir: Path) -> None:
-    pass
-    # TODO: set GCS_BUCKET env var and uncomment:
-    # import os, subprocess
-    # bucket = os.environ.get("GCS_BUCKET")
-    # if bucket:
-    #     subprocess.run(
-    #         ["gsutil", "-m", "cp", "-r", str(exp_dir), f"gs://{bucket}/raw/"],
-    #         check=True,
-    #     )
+    import subprocess
+    logger.info("Uploading %s → gs://%s/raw/", exp_dir.name, GCS_BUCKET)
+    subprocess.run(
+        ["gcloud", "storage", "cp", "-r", str(exp_dir), f"gs://{GCS_BUCKET}/raw/"],
+        check=True,
+    )
+    logger.info("Upload complete: gs://%s/raw/%s", GCS_BUCKET, exp_dir.name)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
