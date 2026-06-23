@@ -1,0 +1,22 @@
+# Smoke-test: inject 200ms latency into checkoutservice for 60 seconds.
+# Apply with:   kubectl apply -f deployment/chaos-mesh/test-latency.yaml
+# Remove with:  kubectl delete -f deployment/chaos-mesh/test-latency.yaml
+# Verify in Jaeger: checkoutservice traces should show ~200ms added latency.
+apiVersion: chaos-mesh.org/v1alpha1
+kind: NetworkChaos
+metadata:
+  name: test-latency-checkoutservice
+  namespace: online-boutique
+spec:
+  action: delay
+  mode: all
+  selector:
+    namespaces:
+      - online-boutique
+    labelSelectors:
+      app: checkoutservice
+  delay:
+    latency: "200ms"
+    jitter: "0ms"
+    correlation: "0"
+  duration: "60s"
