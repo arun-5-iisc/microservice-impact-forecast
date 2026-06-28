@@ -1,0 +1,381 @@
+"""
+Train baseline ML models for proactive deployment impact forecasting.
+
+Tasks:
+  1. Severity classification  — predict Low / Medium / High from early signals
+  2. Blast radius regression  — predict final blast_radius_final from early signals
+
+Models: RandomForest, XGBoost, LightGBM (all three for both tasks)
+
+Evaluation uses GroupKFold grouped by experiment_id so all 4 T-snapshots
+of the same experiment land in the same fold — prevents label leakage across
+the time-into-fault dimension.
+
+Outputs:
+  models/    — saved .joblib files for each model
+  results/   — classification_report.csv, regression_report.csv,
+               feature_importance.csv, predictions.csv
+
+Usage:
+  python scripts/train_model.py
+  python scripts/train_model.py --data dataset/processed/training_dataset.csv
+"""
+import argparse
+import json
+import logging
+import warnings
+from pathlib import Path
+
+import joblib
+import numpy as np
+import pandas as pd
+from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
+from sklearn.metrics import (
+    classification_report,
+    f1_score,
+    mean_absolute_error,
+    mean_squared_error,
+    accuracy_score,
+)
+from sklearn.model_selection import GroupKFold, cross_validate
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import LabelEncoder, OrdinalEncoder
+from sklearn.impute import SimpleImputer
+from sklearn.compose import ColumnTransformer
+from xgboost import XGBClassifier, XGBRegressor
+from lightgbm import LGBMClassifier, LGBMRegressor
+
+warnings.filterwarnings("ignore", category=UserWarning)
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s  %(levelname)-8s  %(message)s",
+    datefmt="%Y-%m-%dT%H:%M:%S",
+)
+logger = logging.getLogger(__name__)
+
+REPO_ROOT   = Path(__file__).parent.parent
+DEFAULT_DATA = REPO_ROOT / "dataset" / "processed" / "training_dataset.csv"
+MODELS_DIR   = REPO_ROOT / "models"
+RESULTS_DIR  = REPO_ROOT / "results"
+
+N_FOLDS = 5
+
+CATEGORICAL_FEATURES = ["fault_type", "service", "traffic_level"]
+NUMERIC_FEATURES = [
+    "fault_value_numeric",
+    "time_into_fault_s",
+    "target_cpu",
+    "target_cpu_delta",
+    "target_memory_bytes",
+    "target_memory_delta",
+    "target_replicas",
+    "target_restart_count",
+    "system_cpu_mean",
+    "system_memory_mean",
+    "target_request_rate",
+    "target_error_rate",
+    "target_latency_mean_ms",
+    "target_latency_delta",
+    "blast_radius_early",
+    "max_trace_depth",
+]
+
+SEVERITY_ORDER = ["Low", "Medium", "High"]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Preprocessing pipeline (shared by all models)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _build_preprocessor():
+    numeric_pipe = Pipeline([
+        ("imputer", SimpleImputer(strategy="median")),
+    ])
+    categorical_pipe = Pipeline([
+        ("imputer", SimpleImputer(strategy="constant", fill_value="unknown")),
+        ("encoder", OrdinalEncoder(handle_unknown="use_encoded_value", unknown_value=-1)),
+    ])
+    return ColumnTransformer([
+        ("num", numeric_pipe, NUMERIC_FEATURES),
+        ("cat", categorical_pipe, CATEGORICAL_FEATURES),
+    ], remainder="drop")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Model definitions
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _classifiers():
+    return {
+        "RandomForest": RandomForestClassifier(
+            n_estimators=300, max_depth=None, class_weight="balanced",
+            random_state=42, n_jobs=-1,
+        ),
+        "XGBoost": XGBClassifier(
+            n_estimators=300, max_depth=6, learning_rate=0.05,
+            eval_metric="mlogloss", random_state=42,
+            verbosity=0, use_label_encoder=False,
+        ),
+        "LightGBM": LGBMClassifier(
+            n_estimators=300, max_depth=-1, learning_rate=0.05,
+            class_weight="balanced", random_state=42,
+            verbose=-1,
+        ),
+    }
+
+
+def _regressors():
+    return {
+        "RandomForest": RandomForestRegressor(
+            n_estimators=300, max_depth=None, random_state=42, n_jobs=-1,
+        ),
+        "XGBoost": XGBRegressor(
+            n_estimators=300, max_depth=6, learning_rate=0.05,
+            random_state=42, verbosity=0,
+        ),
+        "LightGBM": LGBMRegressor(
+            n_estimators=300, max_depth=-1, learning_rate=0.05,
+            random_state=42, verbose=-1,
+        ),
+    }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Feature importance (works across all three model families)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _feature_names(preprocessor):
+    num_names = NUMERIC_FEATURES
+    cat_names = CATEGORICAL_FEATURES
+    return num_names + cat_names
+
+
+def _get_importances(model, preprocessor):
+    feat_names = _feature_names(preprocessor)
+    estimator = model.named_steps["model"]
+    if hasattr(estimator, "feature_importances_"):
+        imp = estimator.feature_importances_
+        return pd.Series(imp, index=feat_names).sort_values(ascending=False)
+    return None
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Cross-validated evaluation (no retrain — fit on each fold)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _evaluate_classifier(name, estimator, X, y_encoded, groups, le):
+    pipe = Pipeline([
+        ("pre", _build_preprocessor()),
+        ("model", estimator),
+    ])
+    gkf = GroupKFold(n_splits=N_FOLDS)
+
+    fold_reports = []
+    all_preds, all_true = [], []
+
+    for fold, (train_idx, test_idx) in enumerate(gkf.split(X, y_encoded, groups)):
+        X_tr, X_te = X.iloc[train_idx], X.iloc[test_idx]
+        y_tr, y_te = y_encoded[train_idx], y_encoded[test_idx]
+
+        pipe.fit(X_tr, y_tr)
+        y_pred = pipe.predict(X_te)
+
+        all_preds.extend(y_pred)
+        all_true.extend(y_te)
+
+        report = classification_report(
+            y_te, y_pred,
+            target_names=le.classes_,
+            output_dict=True,
+            zero_division=0,
+        )
+        fold_reports.append(report)
+
+    # Aggregate across folds
+    agg = {}
+    for cls in le.classes_:
+        agg[cls] = {
+            m: np.mean([r[cls][m] for r in fold_reports])
+            for m in ("precision", "recall", "f1-score")
+        }
+    agg["macro avg"] = {
+        m: np.mean([r["macro avg"][m] for r in fold_reports])
+        for m in ("precision", "recall", "f1-score")
+    }
+    agg["accuracy"] = np.mean([accuracy_score(
+        y_encoded[[i for i in range(len(y_encoded)) if i in test_idx]],
+        [all_preds[j] for j, i in enumerate(range(len(y_encoded))) if i in test_idx],
+    ) for _, test_idx in gkf.split(X, y_encoded, groups)])
+
+    # Refit on full data for feature importance + saved model
+    pipe.fit(X, y_encoded)
+    imp = _get_importances(pipe, pipe.named_steps["pre"])
+
+    return pipe, agg, imp, np.array(all_preds), np.array(all_true)
+
+
+def _evaluate_regressor(name, estimator, X, y, groups):
+    pipe = Pipeline([
+        ("pre", _build_preprocessor()),
+        ("model", estimator),
+    ])
+    gkf = GroupKFold(n_splits=N_FOLDS)
+
+    fold_mae, fold_rmse = [], []
+    all_preds, all_true = [], []
+
+    for fold, (train_idx, test_idx) in enumerate(gkf.split(X, y, groups)):
+        X_tr, X_te = X.iloc[train_idx], X.iloc[test_idx]
+        y_tr, y_te = y[train_idx], y[test_idx]
+
+        pipe.fit(X_tr, y_tr)
+        y_pred = pipe.predict(X_te)
+
+        all_preds.extend(y_pred)
+        all_true.extend(y_te)
+
+        fold_mae.append(mean_absolute_error(y_te, y_pred))
+        fold_rmse.append(np.sqrt(mean_squared_error(y_te, y_pred)))
+
+    pipe.fit(X, y)
+    imp = _get_importances(pipe, pipe.named_steps["pre"])
+
+    return pipe, {
+        "mae_mean":  np.mean(fold_mae),
+        "mae_std":   np.std(fold_mae),
+        "rmse_mean": np.mean(fold_rmse),
+        "rmse_std":  np.std(fold_rmse),
+    }, imp
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Main
+# ─────────────────────────────────────────────────────────────────────────────
+
+def main(data_path: Path):
+    MODELS_DIR.mkdir(parents=True, exist_ok=True)
+    RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+
+    logger.info("Loading dataset from %s", data_path)
+    df = pd.read_csv(data_path)
+    logger.info("Dataset: %d rows, %d experiments", len(df), df["experiment_id"].nunique())
+
+    X      = df[NUMERIC_FEATURES + CATEGORICAL_FEATURES]
+    groups = df["experiment_id"].values
+
+    # ── Task 1: Severity Classification ──────────────────────────────────────
+    logger.info("\n%s\nTask 1: Severity Classification\n%s", "="*55, "="*55)
+
+    le = LabelEncoder()
+    le.classes_ = np.array(SEVERITY_ORDER)
+    y_cls = le.transform(df["severity"])
+
+    clf_rows = []
+    feat_imp_cls = {}
+
+    for name, estimator in _classifiers().items():
+        logger.info("Training %s classifier...", name)
+        pipe, report, imp, preds, true = _evaluate_classifier(
+            name, estimator, X, y_cls, groups, le
+        )
+        joblib.dump(pipe, MODELS_DIR / f"clf_{name.lower()}.joblib")
+
+        row = {"model": name}
+        for cls in SEVERITY_ORDER:
+            row[f"{cls}_f1"] = round(report[cls]["f1-score"], 4)
+        row["macro_f1"]  = round(report["macro avg"]["f1-score"], 4)
+        row["accuracy"]  = round(report["accuracy"], 4)
+        clf_rows.append(row)
+
+        if imp is not None:
+            feat_imp_cls[name] = imp
+
+        logger.info(
+            "  %s → accuracy=%.3f  macro-F1=%.3f  "
+            "[Low=%.3f  Med=%.3f  High=%.3f]",
+            name,
+            report["accuracy"],
+            report["macro avg"]["f1-score"],
+            report["Low"]["f1-score"],
+            report["Medium"]["f1-score"],
+            report["High"]["f1-score"],
+        )
+
+    clf_df = pd.DataFrame(clf_rows)
+    clf_df.to_csv(RESULTS_DIR / "classification_report.csv", index=False)
+    logger.info("\nClassification results:\n%s", clf_df.to_string(index=False))
+
+    # ── Task 2: Blast Radius Regression ──────────────────────────────────────
+    logger.info("\n%s\nTask 2: Blast Radius Regression\n%s", "="*55, "="*55)
+
+    y_reg = df["blast_radius_final"].values.astype(float)
+
+    reg_rows = []
+    feat_imp_reg = {}
+
+    for name, estimator in _regressors().items():
+        logger.info("Training %s regressor...", name)
+        pipe, metrics, imp = _evaluate_regressor(name, estimator, X, y_reg, groups)
+        joblib.dump(pipe, MODELS_DIR / f"reg_{name.lower()}.joblib")
+
+        row = {"model": name, **{k: round(v, 4) for k, v in metrics.items()}}
+        reg_rows.append(row)
+
+        if imp is not None:
+            feat_imp_reg[name] = imp
+
+        logger.info(
+            "  %s → MAE=%.3f±%.3f  RMSE=%.3f±%.3f",
+            name,
+            metrics["mae_mean"], metrics["mae_std"],
+            metrics["rmse_mean"], metrics["rmse_std"],
+        )
+
+    reg_df = pd.DataFrame(reg_rows)
+    reg_df.to_csv(RESULTS_DIR / "regression_report.csv", index=False)
+    logger.info("\nRegression results:\n%s", reg_df.to_string(index=False))
+
+    # ── Feature Importance ────────────────────────────────────────────────────
+    logger.info("\n%s\nFeature Importance (Classification)\n%s", "="*55, "="*55)
+
+    imp_records = []
+    for model_name, imp in feat_imp_cls.items():
+        for feat, score in imp.items():
+            imp_records.append({"model": model_name, "feature": feat, "importance": round(score, 6)})
+
+    imp_df = pd.DataFrame(imp_records)
+    imp_df.to_csv(RESULTS_DIR / "feature_importance.csv", index=False)
+
+    # Print top 10 by RandomForest (most interpretable)
+    if "RandomForest" in feat_imp_cls:
+        top10 = feat_imp_cls["RandomForest"].head(10)
+        logger.info("\nTop 10 features (RandomForest classifier):\n%s", top10.to_string())
+
+    # ── Accuracy vs Time into Fault ───────────────────────────────────────────
+    logger.info("\n%s\nAccuracy vs Time-into-fault\n%s", "="*55, "="*55)
+
+    best_clf = joblib.load(MODELS_DIR / "clf_randomforest.joblib")
+    t_rows = []
+    for T in [15, 30, 45, 60]:
+        mask = df["time_into_fault_s"] == T
+        if mask.sum() == 0:
+            continue
+        X_t = df.loc[mask, NUMERIC_FEATURES + CATEGORICAL_FEATURES]
+        y_t = le.transform(df.loc[mask, "severity"])
+        preds = best_clf.predict(X_t)
+        acc = accuracy_score(y_t, preds)
+        f1  = f1_score(y_t, preds, average="macro", zero_division=0)
+        t_rows.append({"time_into_fault_s": T, "accuracy": round(acc, 4), "macro_f1": round(f1, 4)})
+        logger.info("  T=%2ds → accuracy=%.3f  macro-F1=%.3f", T, acc, f1)
+
+    pd.DataFrame(t_rows).to_csv(RESULTS_DIR / "accuracy_vs_time.csv", index=False)
+
+    logger.info("\nAll outputs saved to %s/ and %s/", RESULTS_DIR, MODELS_DIR)
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Train impact forecasting models")
+    parser.add_argument("--data", type=Path, default=DEFAULT_DATA)
+    args = parser.parse_args()
+    main(args.data)
