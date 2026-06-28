@@ -141,9 +141,18 @@ def add_fault_severity_ratio(df: pd.DataFrame) -> pd.DataFrame:
 
 def add_log_transforms(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
-    df["log_target_latency_mean_ms"] = np.log1p(df["target_latency_mean_ms"].fillna(0))
-    df["log_target_memory_bytes"]    = np.log1p(df["target_memory_bytes"].fillna(0))
-    df["log_fault_value_numeric"]    = np.log1p(df["fault_value_numeric"].fillna(0))
+    # Leave NaN as NaN — the median imputer in the training pipeline handles them.
+    # fillna(0) before log1p would create log1p(0)=0 which is indistinguishable from
+    # real zero values and introduces spurious signal for missing observations.
+    df["log_target_latency_mean_ms"] = df["target_latency_mean_ms"].apply(
+        lambda x: np.log1p(x) if pd.notna(x) else np.nan
+    )
+    df["log_target_memory_bytes"] = df["target_memory_bytes"].apply(
+        lambda x: np.log1p(x) if pd.notna(x) else np.nan
+    )
+    df["log_fault_value_numeric"] = df["fault_value_numeric"].apply(
+        lambda x: np.log1p(x) if pd.notna(x) else np.nan
+    )
     return df
 
 
@@ -319,6 +328,20 @@ def main(in_path: Path, out_path: Path):
         )
         df["system_error_rate"]    = np.nan
         df["system_latency_ratio"] = np.nan
+
+    er_null  = df["system_error_rate"].isnull().sum()
+    slr_null = df["system_latency_ratio"].isnull().sum()
+    logger.info(
+        "System trace aggregate coverage: system_error_rate null=%d/%d (%.0f%%), "
+        "system_latency_ratio null=%d/%d (%.0f%%)",
+        er_null,  len(df), 100 * er_null  / len(df),
+        slr_null, len(df), 100 * slr_null / len(df),
+    )
+    if er_null > len(df) * 0.5:
+        logger.warning(
+            "system_error_rate is >50%% NaN — will be imputed with median (flat signal). "
+            "Ensure raw trace data is present when running feature_engineer.py."
+        )
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
     df.to_csv(out_path, index=False)

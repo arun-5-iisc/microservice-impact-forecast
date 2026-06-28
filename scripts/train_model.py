@@ -45,7 +45,7 @@ from sklearn.metrics import (
 )
 from sklearn.model_selection import GroupKFold
 from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import LabelEncoder, OrdinalEncoder, OneHotEncoder
+from sklearn.preprocessing import LabelEncoder, OrdinalEncoder
 from sklearn.impute import SimpleImputer
 from sklearn.compose import ColumnTransformer
 from xgboost import XGBClassifier, XGBRegressor
@@ -67,10 +67,7 @@ RESULTS_DIR  = REPO_ROOT / "results"
 
 N_FOLDS = 5
 
-# Ordinal categoricals (low cardinality, can tolerate ordinal encoding)
-ORDINAL_FEATURES = ["fault_type", "traffic_level"]
-# One-hot categorical (nominal, 10 services — no ordinal meaning)
-ONEHOT_FEATURES  = ["service"]
+CATEGORICAL_FEATURES = ["fault_type", "service", "traffic_level"]
 
 # Base numeric features (always present in training_dataset.csv)
 BASE_NUMERIC_FEATURES = [
@@ -116,18 +113,13 @@ def _build_preprocessor(numeric_features: list[str]):
     numeric_pipe = Pipeline([
         ("imputer", SimpleImputer(strategy="median")),
     ])
-    ordinal_pipe = Pipeline([
+    categorical_pipe = Pipeline([
         ("imputer", SimpleImputer(strategy="constant", fill_value="unknown")),
         ("encoder", OrdinalEncoder(handle_unknown="use_encoded_value", unknown_value=-1)),
     ])
-    onehot_pipe = Pipeline([
-        ("imputer", SimpleImputer(strategy="constant", fill_value="unknown")),
-        ("encoder", OneHotEncoder(handle_unknown="ignore", sparse_output=False)),
-    ])
     return ColumnTransformer([
-        ("num",    numeric_pipe, numeric_features),
-        ("ord",    ordinal_pipe, ORDINAL_FEATURES),
-        ("onehot", onehot_pipe,  ONEHOT_FEATURES),
+        ("num", numeric_pipe,     numeric_features),
+        ("cat", categorical_pipe, CATEGORICAL_FEATURES),
     ], remainder="drop")
 
 
@@ -175,25 +167,12 @@ def _regressors():
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _get_importances(pipe, numeric_features: list[str]):
-    """Return a feature importance Series using the names actually passed to the pipeline."""
     estimator = pipe.named_steps["model"]
     if not hasattr(estimator, "feature_importances_"):
         return None
-    pre = pipe.named_steps["pre"]
-    # Numeric + ordinal names are the same as input column names.
-    # OneHotEncoder expands service → service_<val> per category seen during fit.
-    try:
-        onehot_names = list(
-            pre.named_transformers_["onehot"]
-            .named_steps["encoder"]
-            .get_feature_names_out(ONEHOT_FEATURES)
-        )
-    except Exception:
-        onehot_names = ONEHOT_FEATURES
-    feat_names = numeric_features + ORDINAL_FEATURES + onehot_names
+    feat_names = numeric_features + CATEGORICAL_FEATURES
     imp = estimator.feature_importances_
     if len(imp) != len(feat_names):
-        # Fall back to positional indices if sizes don't match
         feat_names = [f"f{i}" for i in range(len(imp))]
     return pd.Series(imp, index=feat_names).sort_values(ascending=False)
 
@@ -306,11 +285,11 @@ def main(data_path: Path):
 
     # Detect which feature columns are present (FE dataset has extra cols)
     numeric_features = [c for c in BASE_NUMERIC_FEATURES + FE_NUMERIC_FEATURES if c in df.columns]
-    all_features     = numeric_features + ORDINAL_FEATURES + ONEHOT_FEATURES
+    all_features     = numeric_features + CATEGORICAL_FEATURES
     is_fe_dataset    = any(c in df.columns for c in FE_NUMERIC_FEATURES)
     logger.info(
-        "Feature set: %d numeric + %d ordinal + %d onehot (%s)",
-        len(numeric_features), len(ORDINAL_FEATURES), len(ONEHOT_FEATURES),
+        "Feature set: %d numeric + %d categorical (%s)",
+        len(numeric_features), len(CATEGORICAL_FEATURES),
         "FE dataset" if is_fe_dataset else "baseline dataset",
     )
 
