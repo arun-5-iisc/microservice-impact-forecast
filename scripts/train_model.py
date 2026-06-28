@@ -172,7 +172,9 @@ def _evaluate_classifier(name, estimator, X, y_encoded, groups, le):
     gkf = GroupKFold(n_splits=N_FOLDS)
 
     fold_reports = []
-    all_preds, all_true = [], []
+    # Store OOF predictions by original row index to avoid ordering bugs
+    oof_preds = {}
+    oof_true  = {}
 
     for fold, (train_idx, test_idx) in enumerate(gkf.split(X, y_encoded, groups)):
         X_tr, X_te = X.iloc[train_idx], X.iloc[test_idx]
@@ -181,8 +183,9 @@ def _evaluate_classifier(name, estimator, X, y_encoded, groups, le):
         pipe.fit(X_tr, y_tr)
         y_pred = pipe.predict(X_te)
 
-        all_preds.extend(y_pred)
-        all_true.extend(y_te)
+        for i, idx in enumerate(test_idx):
+            oof_preds[idx] = y_pred[i]
+            oof_true[idx]  = y_te[i]
 
         report = classification_report(
             y_te, y_pred,
@@ -192,7 +195,12 @@ def _evaluate_classifier(name, estimator, X, y_encoded, groups, le):
         )
         fold_reports.append(report)
 
-    # Aggregate across folds
+    # Reconstruct full OOF arrays in original row order
+    sorted_idx = sorted(oof_preds)
+    preds_arr  = np.array([oof_preds[i] for i in sorted_idx])
+    true_arr   = np.array([oof_true[i]  for i in sorted_idx])
+
+    # Aggregate metrics across folds
     agg = {}
     for cls in le.classes_:
         agg[cls] = {
@@ -203,16 +211,13 @@ def _evaluate_classifier(name, estimator, X, y_encoded, groups, le):
         m: np.mean([r["macro avg"][m] for r in fold_reports])
         for m in ("precision", "recall", "f1-score")
     }
-    agg["accuracy"] = np.mean([accuracy_score(
-        y_encoded[[i for i in range(len(y_encoded)) if i in test_idx]],
-        [all_preds[j] for j, i in enumerate(range(len(y_encoded))) if i in test_idx],
-    ) for _, test_idx in gkf.split(X, y_encoded, groups)])
+    agg["accuracy"] = accuracy_score(true_arr, preds_arr)
 
     # Refit on full data for feature importance + saved model
     pipe.fit(X, y_encoded)
     imp = _get_importances(pipe, pipe.named_steps["pre"])
 
-    return pipe, agg, imp, np.array(all_preds), np.array(all_true)
+    return pipe, agg, imp, preds_arr, true_arr
 
 
 def _evaluate_regressor(name, estimator, X, y, groups):
@@ -273,6 +278,8 @@ def main(data_path: Path):
 
     clf_rows = []
     feat_imp_cls = {}
+    best_oof_preds = None   # OOF predictions from LightGBM (best macro-F1) for time analysis
+    best_oof_true  = None
 
     for name, estimator in _classifiers().items():
         logger.info("Training %s classifier...", name)
@@ -280,6 +287,10 @@ def main(data_path: Path):
             name, estimator, X, y_cls, groups, le
         )
         joblib.dump(pipe, MODELS_DIR / f"clf_{name.lower()}.joblib")
+        # Keep LightGBM OOF preds for the time-into-fault analysis (best model)
+        if name == "LightGBM":
+            best_oof_preds = preds
+            best_oof_true  = true
 
         row = {"model": name}
         for cls in SEVERITY_ORDER:
@@ -353,19 +364,18 @@ def main(data_path: Path):
         logger.info("\nTop 10 features (RandomForest classifier):\n%s", top10.to_string())
 
     # ── Accuracy vs Time into Fault ───────────────────────────────────────────
-    logger.info("\n%s\nAccuracy vs Time-into-fault\n%s", "="*55, "="*55)
+    # Uses LightGBM OOF predictions (never seen training data) to avoid leakage.
+    logger.info("\n%s\nAccuracy vs Time-into-fault (LightGBM OOF)\n%s", "="*55, "="*55)
 
-    best_clf = joblib.load(MODELS_DIR / "clf_randomforest.joblib")
     t_rows = []
+    t_values = df["time_into_fault_s"].values
     for T in [15, 30, 45, 60]:
-        mask = df["time_into_fault_s"] == T
+        mask = t_values == T
         if mask.sum() == 0:
             continue
-        X_t = df.loc[mask, NUMERIC_FEATURES + CATEGORICAL_FEATURES]
-        y_t = le.transform(df.loc[mask, "severity"])
-        preds = best_clf.predict(X_t)
-        acc = accuracy_score(y_t, preds)
-        f1  = f1_score(y_t, preds, average="macro", zero_division=0)
+        acc = accuracy_score(best_oof_true[mask], best_oof_preds[mask])
+        f1  = f1_score(best_oof_true[mask], best_oof_preds[mask],
+                       average="macro", zero_division=0)
         t_rows.append({"time_into_fault_s": T, "accuracy": round(acc, 4), "macro_f1": round(f1, 4)})
         logger.info("  T=%2ds → accuracy=%.3f  macro-F1=%.3f", T, acc, f1)
 
