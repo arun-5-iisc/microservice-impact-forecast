@@ -1,5 +1,5 @@
 """
-Train baseline ML models for proactive deployment impact forecasting.
+Train ML models for proactive deployment impact forecasting.
 
 Tasks:
   1. Severity classification  — predict Low / Medium / High from early signals
@@ -11,17 +11,23 @@ Evaluation uses GroupKFold grouped by experiment_id so all 4 T-snapshots
 of the same experiment land in the same fold — prevents label leakage across
 the time-into-fault dimension.
 
+Works with both:
+  - Baseline dataset (training_dataset.csv)         — only base numeric/categorical cols
+  - FE dataset      (training_dataset_fe.csv)        — adds topology, log, ratio, system cols
+
+Extra FE columns are used automatically when present; absent columns are silently skipped.
+
 Outputs:
   models/    — saved .joblib files for each model
   results/   — classification_report.csv, regression_report.csv,
-               feature_importance.csv, predictions.csv
+               feature_importance.csv, accuracy_vs_time.csv
 
 Usage:
   python scripts/train_model.py
   python scripts/train_model.py --data dataset/processed/training_dataset.csv
+  python scripts/train_model.py --data dataset/processed/training_dataset_fe.csv
 """
 import argparse
-import json
 import logging
 import warnings
 from pathlib import Path
@@ -37,9 +43,9 @@ from sklearn.metrics import (
     mean_squared_error,
     accuracy_score,
 )
-from sklearn.model_selection import GroupKFold, cross_validate
+from sklearn.model_selection import GroupKFold
 from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import LabelEncoder, OrdinalEncoder
+from sklearn.preprocessing import LabelEncoder, OrdinalEncoder, OneHotEncoder
 from sklearn.impute import SimpleImputer
 from sklearn.compose import ColumnTransformer
 from xgboost import XGBClassifier, XGBRegressor
@@ -54,15 +60,20 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-REPO_ROOT   = Path(__file__).parent.parent
+REPO_ROOT    = Path(__file__).parent.parent
 DEFAULT_DATA = REPO_ROOT / "dataset" / "processed" / "training_dataset.csv"
 MODELS_DIR   = REPO_ROOT / "models"
 RESULTS_DIR  = REPO_ROOT / "results"
 
 N_FOLDS = 5
 
-CATEGORICAL_FEATURES = ["fault_type", "service", "traffic_level"]
-NUMERIC_FEATURES = [
+# Ordinal categoricals (low cardinality, can tolerate ordinal encoding)
+ORDINAL_FEATURES = ["fault_type", "traffic_level"]
+# One-hot categorical (nominal, 10 services — no ordinal meaning)
+ONEHOT_FEATURES  = ["service"]
+
+# Base numeric features (always present in training_dataset.csv)
+BASE_NUMERIC_FEATURES = [
     "fault_value_numeric",
     "time_into_fault_s",
     "target_cpu",
@@ -81,24 +92,42 @@ NUMERIC_FEATURES = [
     "max_trace_depth",
 ]
 
+# Optional FE columns added by feature_engineer.py
+FE_NUMERIC_FEATURES = [
+    "service_depth",
+    "service_downstream_count",
+    "service_is_gateway",
+    "fault_severity_ratio",
+    "log_target_latency_mean_ms",
+    "log_target_memory_bytes",
+    "log_fault_value_numeric",
+    "system_error_rate",
+    "system_latency_ratio",
+]
+
 SEVERITY_ORDER = ["Low", "Medium", "High"]
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Preprocessing pipeline (shared by all models)
+# Preprocessing pipeline (built dynamically to match available columns)
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _build_preprocessor():
+def _build_preprocessor(numeric_features: list[str]):
     numeric_pipe = Pipeline([
         ("imputer", SimpleImputer(strategy="median")),
     ])
-    categorical_pipe = Pipeline([
+    ordinal_pipe = Pipeline([
         ("imputer", SimpleImputer(strategy="constant", fill_value="unknown")),
         ("encoder", OrdinalEncoder(handle_unknown="use_encoded_value", unknown_value=-1)),
     ])
+    onehot_pipe = Pipeline([
+        ("imputer", SimpleImputer(strategy="constant", fill_value="unknown")),
+        ("encoder", OneHotEncoder(handle_unknown="ignore", sparse_output=False)),
+    ])
     return ColumnTransformer([
-        ("num", numeric_pipe, NUMERIC_FEATURES),
-        ("cat", categorical_pipe, CATEGORICAL_FEATURES),
+        ("num",    numeric_pipe, numeric_features),
+        ("ord",    ordinal_pipe, ORDINAL_FEATURES),
+        ("onehot", onehot_pipe,  ONEHOT_FEATURES),
     ], remainder="drop")
 
 
@@ -145,28 +174,37 @@ def _regressors():
 # Feature importance (works across all three model families)
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _feature_names(preprocessor):
-    num_names = NUMERIC_FEATURES
-    cat_names = CATEGORICAL_FEATURES
-    return num_names + cat_names
-
-
-def _get_importances(model, preprocessor):
-    feat_names = _feature_names(preprocessor)
-    estimator = model.named_steps["model"]
-    if hasattr(estimator, "feature_importances_"):
-        imp = estimator.feature_importances_
-        return pd.Series(imp, index=feat_names).sort_values(ascending=False)
-    return None
+def _get_importances(pipe, numeric_features: list[str]):
+    """Return a feature importance Series using the names actually passed to the pipeline."""
+    estimator = pipe.named_steps["model"]
+    if not hasattr(estimator, "feature_importances_"):
+        return None
+    pre = pipe.named_steps["pre"]
+    # Numeric + ordinal names are the same as input column names.
+    # OneHotEncoder expands service → service_<val> per category seen during fit.
+    try:
+        onehot_names = list(
+            pre.named_transformers_["onehot"]
+            .named_steps["encoder"]
+            .get_feature_names_out(ONEHOT_FEATURES)
+        )
+    except Exception:
+        onehot_names = ONEHOT_FEATURES
+    feat_names = numeric_features + ORDINAL_FEATURES + onehot_names
+    imp = estimator.feature_importances_
+    if len(imp) != len(feat_names):
+        # Fall back to positional indices if sizes don't match
+        feat_names = [f"f{i}" for i in range(len(imp))]
+    return pd.Series(imp, index=feat_names).sort_values(ascending=False)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Cross-validated evaluation (no retrain — fit on each fold)
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _evaluate_classifier(name, estimator, X, y_encoded, groups, le):
+def _evaluate_classifier(name, estimator, X, y_encoded, groups, le, numeric_features):
     pipe = Pipeline([
-        ("pre", _build_preprocessor()),
+        ("pre", _build_preprocessor(numeric_features)),
         ("model", estimator),
     ])
     gkf = GroupKFold(n_splits=N_FOLDS)
@@ -215,14 +253,14 @@ def _evaluate_classifier(name, estimator, X, y_encoded, groups, le):
 
     # Refit on full data for feature importance + saved model
     pipe.fit(X, y_encoded)
-    imp = _get_importances(pipe, pipe.named_steps["pre"])
+    imp = _get_importances(pipe, numeric_features)
 
     return pipe, agg, imp, preds_arr, true_arr
 
 
-def _evaluate_regressor(name, estimator, X, y, groups):
+def _evaluate_regressor(name, estimator, X, y, groups, numeric_features):
     pipe = Pipeline([
-        ("pre", _build_preprocessor()),
+        ("pre", _build_preprocessor(numeric_features)),
         ("model", estimator),
     ])
     gkf = GroupKFold(n_splits=N_FOLDS)
@@ -244,7 +282,7 @@ def _evaluate_regressor(name, estimator, X, y, groups):
         fold_rmse.append(np.sqrt(mean_squared_error(y_te, y_pred)))
 
     pipe.fit(X, y)
-    imp = _get_importances(pipe, pipe.named_steps["pre"])
+    imp = _get_importances(pipe, numeric_features)
 
     return pipe, {
         "mae_mean":  np.mean(fold_mae),
@@ -266,7 +304,17 @@ def main(data_path: Path):
     df = pd.read_csv(data_path)
     logger.info("Dataset: %d rows, %d experiments", len(df), df["experiment_id"].nunique())
 
-    X      = df[NUMERIC_FEATURES + CATEGORICAL_FEATURES]
+    # Detect which feature columns are present (FE dataset has extra cols)
+    numeric_features = [c for c in BASE_NUMERIC_FEATURES + FE_NUMERIC_FEATURES if c in df.columns]
+    all_features     = numeric_features + ORDINAL_FEATURES + ONEHOT_FEATURES
+    is_fe_dataset    = any(c in df.columns for c in FE_NUMERIC_FEATURES)
+    logger.info(
+        "Feature set: %d numeric + %d ordinal + %d onehot (%s)",
+        len(numeric_features), len(ORDINAL_FEATURES), len(ONEHOT_FEATURES),
+        "FE dataset" if is_fe_dataset else "baseline dataset",
+    )
+
+    X      = df[all_features]
     groups = df["experiment_id"].values
 
     # ── Task 1: Severity Classification ──────────────────────────────────────
@@ -284,7 +332,7 @@ def main(data_path: Path):
     for name, estimator in _classifiers().items():
         logger.info("Training %s classifier...", name)
         pipe, report, imp, preds, true = _evaluate_classifier(
-            name, estimator, X, y_cls, groups, le
+            name, estimator, X, y_cls, groups, le, numeric_features
         )
         joblib.dump(pipe, MODELS_DIR / f"clf_{name.lower()}.joblib")
         # Keep LightGBM OOF preds for the time-into-fault analysis (best model)
@@ -327,7 +375,7 @@ def main(data_path: Path):
 
     for name, estimator in _regressors().items():
         logger.info("Training %s regressor...", name)
-        pipe, metrics, imp = _evaluate_regressor(name, estimator, X, y_reg, groups)
+        pipe, metrics, imp = _evaluate_regressor(name, estimator, X, y_reg, groups, numeric_features)
         joblib.dump(pipe, MODELS_DIR / f"reg_{name.lower()}.joblib")
 
         row = {"model": name, **{k: round(v, 4) for k, v in metrics.items()}}
