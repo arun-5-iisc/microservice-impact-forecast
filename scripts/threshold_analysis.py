@@ -228,7 +228,7 @@ def plot_feature_boxplots(df: pd.DataFrame, out_dir: Path):
     for ax, (feat, label) in zip(axes, features):
         data = [df[df["severity"] == sev][feat].dropna().values
                 for sev in SEVERITY_ORDER]
-        bp = ax.boxplot(data, patch_artist=True, labels=SEVERITY_ORDER)
+        bp = ax.boxplot(data, patch_artist=True, tick_labels=SEVERITY_ORDER)
         for patch, sev in zip(bp["boxes"], SEVERITY_ORDER):
             patch.set_facecolor(SEVERITY_COLORS[sev])
             patch.set_alpha(0.7)
