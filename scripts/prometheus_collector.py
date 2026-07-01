@@ -161,14 +161,19 @@ class PrometheusCollector:
             return []
 
         n = len(timestamps)
+
+        def _val(metric, i):
+            s = series.get(metric)
+            return s[i] if s and i < len(s) else None
+
         return [
             {
-                "timestamp": timestamps[i],
-                "service": service,
-                "cpu_usage": series["cpu_usage"][i] if series.get("cpu_usage") else None,
-                "memory_bytes": series["memory_bytes"][i] if series.get("memory_bytes") else None,
-                "replicas": series["replicas"][i] if series.get("replicas") else None,
-                "restart_count": series["restart_count"][i] if series.get("restart_count") else None,
+                "timestamp":     timestamps[i],
+                "service":       service,
+                "cpu_usage":     _val("cpu_usage", i),
+                "memory_bytes":  _val("memory_bytes", i),
+                "replicas":      _val("replicas", i),
+                "restart_count": _val("restart_count", i),
             }
             for i in range(n)
         ]
