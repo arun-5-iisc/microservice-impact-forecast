@@ -1,12 +1,16 @@
 """
-Runs the 8 missing experiments that fill service-fault coverage gaps.
+Runs the 40 missing experiments that complete the service-fault coverage matrix.
 
-Gaps identified from coverage analysis:
-  adservice       — replicas
-  emailservice    — replicas
-  paymentservice  — latency (500ms, 1000ms)
-  shippingservice — latency (500ms, 1000ms)
-  currencyservice — latency (200ms, 500ms)
+Original 90-experiment batch covered CPU for all 10 services but left gaps in
+memory, replicas and latency for 4-5 services.  This script fills every gap so
+every service has at least one experiment per fault type.
+
+Gaps filled:
+  Memory    — currencyservice, emailservice, paymentservice, shippingservice (12)
+  Replicas  — adservice, emailservice                                         (2)
+  Latency   — adservice, currencyservice, emailservice, paymentservice,
+               shippingservice × 4 values normal                             (20)
+  Latency   — paymentservice, shippingservice, currencyservice × high traffic  (6)
 
 State is persisted to dataset/missing_state.json after every experiment so the
 script can be safely interrupted and resumed.
@@ -46,14 +50,62 @@ COOLDOWN_SECONDS = 30
 # ─────────────────────────────────────────────────────────────────────────────
 
 MISSING_EXPERIMENTS = [
-    {"service": "adservice",       "fault": "replicas", "value": "0",    "traffic": "normal"},
-    {"service": "emailservice",    "fault": "replicas", "value": "0",    "traffic": "normal"},
-    {"service": "paymentservice",  "fault": "latency",  "value": "500",  "traffic": "normal"},
-    {"service": "paymentservice",  "fault": "latency",  "value": "1000", "traffic": "normal"},
-    {"service": "shippingservice", "fault": "latency",  "value": "500",  "traffic": "normal"},
-    {"service": "shippingservice", "fault": "latency",  "value": "1000", "traffic": "normal"},
-    {"service": "currencyservice", "fault": "latency",  "value": "200",  "traffic": "normal"},
-    {"service": "currencyservice", "fault": "latency",  "value": "500",  "traffic": "normal"},
+    # ── Memory gaps (4 services not in original _MEMORY_SERVICES) ────────────
+    # Values calibrated the same way as run_batch.py: limit ≥ request, 3 severity levels
+    # currencyservice: req=128Mi lim=256Mi  →  same pattern as cartservice
+    {"service": "currencyservice", "fault": "memory", "value": "192Mi", "traffic": "normal"},
+    {"service": "currencyservice", "fault": "memory", "value": "160Mi", "traffic": "normal"},
+    {"service": "currencyservice", "fault": "memory", "value": "128Mi", "traffic": "normal"},
+    # emailservice: req=64Mi lim=128Mi  →  same pattern as checkoutservice
+    {"service": "emailservice",    "fault": "memory", "value": "100Mi", "traffic": "normal"},
+    {"service": "emailservice",    "fault": "memory", "value": "80Mi",  "traffic": "normal"},
+    {"service": "emailservice",    "fault": "memory", "value": "64Mi",  "traffic": "normal"},
+    # paymentservice: req=128Mi lim=256Mi  →  same pattern as cartservice
+    {"service": "paymentservice",  "fault": "memory", "value": "192Mi", "traffic": "normal"},
+    {"service": "paymentservice",  "fault": "memory", "value": "160Mi", "traffic": "normal"},
+    {"service": "paymentservice",  "fault": "memory", "value": "128Mi", "traffic": "normal"},
+    # shippingservice: req=64Mi lim=128Mi  →  same pattern as checkoutservice
+    {"service": "shippingservice", "fault": "memory", "value": "100Mi", "traffic": "normal"},
+    {"service": "shippingservice", "fault": "memory", "value": "80Mi",  "traffic": "normal"},
+    {"service": "shippingservice", "fault": "memory", "value": "64Mi",  "traffic": "normal"},
+
+    # ── Replica gaps (2 services not in original _REPLICA_SERVICES) ──────────
+    {"service": "adservice",       "fault": "replicas", "value": "0", "traffic": "normal"},
+    {"service": "emailservice",    "fault": "replicas", "value": "0", "traffic": "normal"},
+
+    # ── Latency gaps — normal traffic (5 services not in original _LATENCY_SERVICES)
+    {"service": "adservice",       "fault": "latency", "value": "100",  "traffic": "normal"},
+    {"service": "adservice",       "fault": "latency", "value": "200",  "traffic": "normal"},
+    {"service": "adservice",       "fault": "latency", "value": "500",  "traffic": "normal"},
+    {"service": "adservice",       "fault": "latency", "value": "1000", "traffic": "normal"},
+
+    {"service": "currencyservice", "fault": "latency", "value": "100",  "traffic": "normal"},
+    {"service": "currencyservice", "fault": "latency", "value": "200",  "traffic": "normal"},
+    {"service": "currencyservice", "fault": "latency", "value": "500",  "traffic": "normal"},
+    {"service": "currencyservice", "fault": "latency", "value": "1000", "traffic": "normal"},
+
+    {"service": "emailservice",    "fault": "latency", "value": "100",  "traffic": "normal"},
+    {"service": "emailservice",    "fault": "latency", "value": "200",  "traffic": "normal"},
+    {"service": "emailservice",    "fault": "latency", "value": "500",  "traffic": "normal"},
+    {"service": "emailservice",    "fault": "latency", "value": "1000", "traffic": "normal"},
+
+    {"service": "paymentservice",  "fault": "latency", "value": "100",  "traffic": "normal"},
+    {"service": "paymentservice",  "fault": "latency", "value": "200",  "traffic": "normal"},
+    {"service": "paymentservice",  "fault": "latency", "value": "500",  "traffic": "normal"},
+    {"service": "paymentservice",  "fault": "latency", "value": "1000", "traffic": "normal"},
+
+    {"service": "shippingservice", "fault": "latency", "value": "100",  "traffic": "normal"},
+    {"service": "shippingservice", "fault": "latency", "value": "200",  "traffic": "normal"},
+    {"service": "shippingservice", "fault": "latency", "value": "500",  "traffic": "normal"},
+    {"service": "shippingservice", "fault": "latency", "value": "1000", "traffic": "normal"},
+
+    # ── Latency gaps — high traffic (checkout-path services, mirrors original pattern)
+    {"service": "paymentservice",  "fault": "latency", "value": "500",  "traffic": "high"},
+    {"service": "paymentservice",  "fault": "latency", "value": "1000", "traffic": "high"},
+    {"service": "shippingservice", "fault": "latency", "value": "500",  "traffic": "high"},
+    {"service": "shippingservice", "fault": "latency", "value": "1000", "traffic": "high"},
+    {"service": "currencyservice", "fault": "latency", "value": "500",  "traffic": "high"},
+    {"service": "currencyservice", "fault": "latency", "value": "1000", "traffic": "high"},
 ]
 
 for e in MISSING_EXPERIMENTS:
