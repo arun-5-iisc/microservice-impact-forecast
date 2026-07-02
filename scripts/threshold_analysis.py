@@ -619,25 +619,32 @@ def plot_time_evolution(df: pd.DataFrame, out_dir: Path):
 
     fig, axes = plt.subplots(1, 2, figsize=(13, 5))
     for ax, feat, ylabel, title in [
-        (axes[0], "target_latency_delta", "Mean Latency Delta (fraction of baseline)",
+        (axes[0], "target_latency_delta", "Median Latency Delta (fraction of baseline)",
          "Latency Signal Separation Across Observation Windows"),
-        (axes[1], "target_error_rate",    "Mean Error Rate",
+        (axes[1], "target_error_rate",    "Median Error Rate",
          "Error Rate Separation Across Observation Windows"),
     ]:
         if feat not in df.columns:
             continue
         for sev in SEVERITY_ORDER:
-            means, stds = [], []
+            medians, q25s, q75s = [], [], []
             for T in T_vals:
                 vals = df[(df["severity"] == sev) & (df[time_col] == T)][feat].dropna()
-                means.append(vals.mean() if len(vals) else np.nan)
-                stds.append(vals.std()   if len(vals) else np.nan)
-            means = np.array(means, dtype=float)
-            stds  = np.array(stds,  dtype=float)
-            ax.plot(T_vals, means, "o-", color=SEVERITY_COLORS[sev],
+                if len(vals):
+                    medians.append(vals.median())
+                    q25s.append(vals.quantile(0.25))
+                    q75s.append(vals.quantile(0.75))
+                else:
+                    medians.append(np.nan)
+                    q25s.append(np.nan)
+                    q75s.append(np.nan)
+            medians = np.array(medians, dtype=float)
+            q25s    = np.array(q25s,    dtype=float)
+            q75s    = np.array(q75s,    dtype=float)
+            ax.plot(T_vals, medians, "o-", color=SEVERITY_COLORS[sev],
                     label=sev, linewidth=2.2, markersize=7)
-            ax.fill_between(T_vals, means - stds, means + stds,
-                            color=SEVERITY_COLORS[sev], alpha=0.12)
+            ax.fill_between(T_vals, q25s, q75s,
+                            color=SEVERITY_COLORS[sev], alpha=0.18)
         ax.set_xlabel("Time into Fault Phase (seconds)")
         ax.set_ylabel(ylabel)
         ax.set_title(title)
@@ -646,7 +653,7 @@ def plot_time_evolution(df: pd.DataFrame, out_dir: Path):
 
     fig.suptitle(
         "Proactive Signal Build-Up: Feature Separation Across Observation Windows\n"
-        "(separation at T=15s confirms early detectability; shaded band = ±1 std)",
+        "(separation at T=15s confirms early detectability; shaded band = IQR)",
         fontsize=12, y=1.02,
     )
     plt.tight_layout()
@@ -663,12 +670,14 @@ def plot_time_evolution(df: pd.DataFrame, out_dir: Path):
             for T in T_vals:
                 vals = df[(df["severity"] == sev) & (df[time_col] == T)][feat].dropna()
                 rows.append({
-                    "feature":          feat,
-                    "severity":         sev,
+                    "feature":           feat,
+                    "severity":          sev,
                     "time_into_fault_s": T,
-                    "mean":             round(vals.mean(), 4) if len(vals) else None,
-                    "std":              round(vals.std(),  4) if len(vals) else None,
-                    "n":                len(vals),
+                    "median":            round(vals.median(),        4) if len(vals) else None,
+                    "q25":               round(vals.quantile(0.25),  4) if len(vals) else None,
+                    "q75":               round(vals.quantile(0.75),  4) if len(vals) else None,
+                    "mean":              round(vals.mean(),          4) if len(vals) else None,
+                    "n":                 len(vals),
                 })
     pd.DataFrame(rows).to_csv(out_dir / "time_evolution.csv", index=False)
     logger.info("Saved → %s", out_dir / "time_evolution.csv")
