@@ -233,22 +233,19 @@ def _compute_severity(latency_delta: float | None, error_rate: float,
       3. error_rate thresholds → direct user-visible impact
       4. latency_delta thresholds → relative degradation from baseline
     """
-    if replicas is not None and replicas == 0:
+    if (
+        (replicas is not None and replicas == 0) or
+        (restart_count is not None and restart_count > 0) or
+        (latency_delta is not None and latency_delta > LATENCY_DELTA_HIGH) or
+        (error_rate is not None and error_rate > ERROR_RATE_HIGH)
+    ):
         return "High"
 
-    if restart_count is not None and restart_count > 0:
-        return "High"
-
-    if error_rate > ERROR_RATE_HIGH:
-        return "High"
-    if error_rate > ERROR_RATE_MEDIUM:
+    if (
+        (latency_delta is not None and latency_delta > LATENCY_DELTA_MEDIUM) or
+        (error_rate is not None and error_rate > ERROR_RATE_MEDIUM)
+    ):
         return "Medium"
-
-    if latency_delta is not None:
-        if latency_delta > LATENCY_DELTA_HIGH:
-            return "High"
-        if latency_delta > LATENCY_DELTA_MEDIUM:
-            return "Medium"
 
     return "Low"
 
