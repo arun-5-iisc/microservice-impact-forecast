@@ -303,6 +303,121 @@ def plot_correlation_heatmap(df: pd.DataFrame, out_dir: Path):
     logger.info("Saved → %s", path)
 
 
+# ── 8. Coverage table ─────────────────────────────────────────────────────────
+
+def coverage_table(df: pd.DataFrame, out_dir: Path):
+    """
+    Per-severity count of fault types, services, and unique fault×service
+    combinations. Demonstrates all three classes are operationally diverse
+    and not artifacts of a single fault type or service.
+    """
+    rows = []
+    for sev in SEVERITY_ORDER:
+        sdf = df[df["severity"] == sev].drop_duplicates(subset="experiment_id")
+        rows.append({
+            "severity":               sev,
+            "experiments":            len(sdf),
+            "fault_types":            sdf["fault_type"].nunique(),
+            "services":               sdf["service"].nunique(),
+            "unique_fault_x_service": sdf.groupby(["fault_type", "service"]).ngroups,
+        })
+    result = pd.DataFrame(rows)
+    csv_path = out_dir / "coverage_table.csv"
+    result.to_csv(csv_path, index=False)
+    logger.info("Coverage table:\n%s", result.to_string(index=False))
+    return result
+
+
+# ── 9. Sensitivity analysis ───────────────────────────────────────────────────
+
+def sensitivity_analysis(df: pd.DataFrame, out_dir: Path):
+    """
+    Varies LATENCY_DELTA_HIGH and LATENCY_DELTA_MEDIUM independently and shows
+    how experiment-level class counts change. Flat lines = threshold choice is
+    stable; steep lines = boundary is sensitive and warrants justification.
+
+    Uses final_latency_delta (the value used for labeling, not the early feature).
+    Operates at experiment level (one row per experiment) to avoid 4× inflation.
+    """
+    col = "final_latency_delta"
+    if col not in df.columns:
+        logger.warning("sensitivity_analysis: '%s' not in dataset — re-run preprocess.py first", col)
+        return
+
+    exp_df = df.drop_duplicates(subset="experiment_id")[["experiment_id", col]].copy()
+    vals = exp_df[col].dropna()
+    logger.info("Sensitivity analysis: %d experiments with %s values", len(vals), col)
+
+    high_variants = [0.60, 0.70, 0.80, 0.90, 1.00, 1.10, 1.20, 1.30, 1.40]
+    med_variants  = [0.10, 0.12, 0.15, 0.18, 0.20, 0.22, 0.25, 0.28, 0.30]
+
+    rows = []
+    for high_t in high_variants:
+        rows.append({
+            "vary":     "high_threshold",
+            "medium_t": LATENCY_DELTA_MEDIUM,
+            "high_t":   high_t,
+            "Low":      int((vals <= LATENCY_DELTA_MEDIUM).sum()),
+            "Medium":   int(((vals > LATENCY_DELTA_MEDIUM) & (vals <= high_t)).sum()),
+            "High":     int((vals > high_t).sum()),
+            "current":  high_t == LATENCY_DELTA_HIGH,
+        })
+    for med_t in med_variants:
+        rows.append({
+            "vary":     "medium_threshold",
+            "medium_t": med_t,
+            "high_t":   LATENCY_DELTA_HIGH,
+            "Low":      int((vals <= med_t).sum()),
+            "Medium":   int(((vals > med_t) & (vals <= LATENCY_DELTA_HIGH)).sum()),
+            "High":     int((vals > LATENCY_DELTA_HIGH).sum()),
+            "current":  med_t == LATENCY_DELTA_MEDIUM,
+        })
+
+    result = pd.DataFrame(rows)
+    csv_path = out_dir / "sensitivity_analysis.csv"
+    result.to_csv(csv_path, index=False)
+    logger.info("Saved → %s", csv_path)
+
+    fig, axes = plt.subplots(1, 2, figsize=(13, 5))
+    for ax, vary, x_col, current_val, title in [
+        (axes[0], "high_threshold",   "high_t",   LATENCY_DELTA_HIGH,
+         f"Varying High threshold\n(Medium fixed at {LATENCY_DELTA_MEDIUM})"),
+        (axes[1], "medium_threshold", "medium_t", LATENCY_DELTA_MEDIUM,
+         f"Varying Medium threshold\n(High fixed at {LATENCY_DELTA_HIGH})"),
+    ]:
+        sub = result[result["vary"] == vary]
+        ax.plot(sub[x_col], sub["High"],   "o-", color=SEVERITY_COLORS["High"],   label="High",   linewidth=2)
+        ax.plot(sub[x_col], sub["Medium"], "s-", color=SEVERITY_COLORS["Medium"], label="Medium", linewidth=2)
+        ax.plot(sub[x_col], sub["Low"],    "^-", color=SEVERITY_COLORS["Low"],    label="Low",    linewidth=2)
+        ax.axvline(current_val, color="black", linestyle=":", linewidth=1.5, label="Current")
+        ax.set_xlabel("Threshold value")
+        ax.set_ylabel("Experiment count")
+        ax.set_title(title)
+        ax.legend(fontsize=9)
+
+    fig.suptitle(
+        "Sensitivity Analysis — Latency Delta Threshold Variation\n"
+        "(flat lines = stable threshold; steep = boundary-sensitive)",
+        fontsize=13, y=1.02,
+    )
+    plt.tight_layout()
+    png_path = out_dir / "sensitivity_analysis.png"
+    fig.savefig(png_path, bbox_inches="tight")
+    plt.close(fig)
+    logger.info("Saved → %s", png_path)
+
+    for vary, x_col, current_val in [
+        ("high_threshold",   "high_t",   LATENCY_DELTA_HIGH),
+        ("medium_threshold", "medium_t", LATENCY_DELTA_MEDIUM),
+    ]:
+        sub = result[(result["vary"] == vary) & result["current"]]
+        logger.info(
+            "Current %s=%.2f → Low=%d  Medium=%d  High=%d",
+            x_col, current_val,
+            sub["Low"].values[0], sub["Medium"].values[0], sub["High"].values[0],
+        )
+
+
 # ── Main ───────────────────────────────────────────────────────────────────────
 
 def main(data_path: Path, upload_prefix: str | None):
@@ -330,6 +445,8 @@ def main(data_path: Path, upload_prefix: str | None):
     plot_latency_kde(df, OUT_DIR)
     plot_feature_boxplots(df, OUT_DIR)
     plot_correlation_heatmap(df, OUT_DIR)
+    coverage_table(df, OUT_DIR)
+    sensitivity_analysis(df, OUT_DIR)
 
     # ── Print key findings ────────────────────────────────────────────────────
     logger.info("\n%s\nKEY THRESHOLD FINDINGS\n%s", "="*55, "="*55)

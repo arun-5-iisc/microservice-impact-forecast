@@ -364,6 +364,7 @@ def process_experiment(exp_dir: Path) -> list[dict]:
             # Labels (from final window — same for all 4 rows of this experiment)
             "severity":              severity,
             "blast_radius_final":    blast_radius_final,
+            "final_latency_delta":   final_lat_delta,
         })
 
     return rows
