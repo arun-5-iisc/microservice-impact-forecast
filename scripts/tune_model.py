@@ -245,7 +245,10 @@ def _tune(name: str, objective_fn, direction: str, n_trials: int,
     def _wrapped(trial):
         return objective_fn(trial, X, y, groups, numeric_features)
 
-    study = optuna.create_study(direction=direction)
+    study = optuna.create_study(
+        direction=direction,
+        sampler=optuna.samplers.TPESampler(seed=42),
+    )
     study.optimize(
         _wrapped,
         n_trials=n_trials,
@@ -296,6 +299,18 @@ def _save_study_plots(study: optuna.Study, name: str, plots_dir: Path) -> None:
                        "Install with: pip install kaleido")
     except Exception as exc:
         logger.warning("  Plot export failed (%s): %s", name, exc)
+
+
+def _save_trial_history(study: optuna.Study, direction: str, path: Path) -> None:
+    """Save per-trial values and running best to CSV for later convergence plotting."""
+    df = study.trials_dataframe(attrs=("number", "value", "state"))
+    df = df[df["state"] == "COMPLETE"][["number", "value"]].copy()
+    if direction == "maximize":
+        df["best_so_far"] = df["value"].cummax()
+    else:
+        df["best_so_far"] = df["value"].cummin()
+    df.to_csv(path, index=False)
+    logger.info("  Trial history → %s", path)
 
 
 def _refit_and_save(estimator_cls, best_params, X, y, numeric_features, path,
@@ -489,6 +504,7 @@ def main(data_path: Path, stage: str, clf_model: str, reg_model: str,
             X, y_cls, groups, numeric_features,
         )
         _save_study_plots(study, f"{clf_model}-clf", plots_dir)
+        _save_trial_history(study, "maximize", results_dir / f"trial_history_{clf_model}_clf.csv")
         clf_params = _finalize_clf_params(clf_model, params)
         _refit_and_save(
             _CLF_CLS[clf_model], clf_params, X, y_cls, numeric_features,
@@ -517,6 +533,7 @@ def main(data_path: Path, stage: str, clf_model: str, reg_model: str,
             X, y_reg, groups, numeric_features,
         )
         _save_study_plots(study, f"{reg_model}-reg", plots_dir)
+        _save_trial_history(study, "minimize", results_dir / f"trial_history_{reg_model}_reg.csv")
         reg_params = _finalize_reg_params(reg_model, params)
         _refit_and_save(
             _REG_CLS[reg_model], reg_params, X, y_reg, numeric_features,

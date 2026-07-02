@@ -4,12 +4,14 @@ Generate dissertation-quality visualizations for the three-stage ML pipeline.
 Reads from results/ and saves all plots to results/plots/.
 
 Figures:
-  01_stage_progression.png   — accuracy / macro-F1 / Medium-F1 across pipeline stages
+  01_stage_progression.png    — accuracy / macro-F1 / Medium-F1 across pipeline stages
   02_per_class_f1_heatmap.png — F1 heatmap: model × severity class, coloured by stage
-  03_feature_importance.png  — top-15 features from best classifier (RF on FE)
-  04_accuracy_vs_time.png    — proactive accuracy at T=15,30,45,60s across stages
-  05_blast_radius_mae.png    — regression MAE across all models × stages
+  03_feature_importance.png   — top-15 features from best classifier (RF on FE)
+  04_accuracy_vs_time.png     — proactive accuracy at T=15,30,45,60s across stages
+  05_blast_radius_mae.png     — regression MAE across all models × stages
   06_full_model_comparison.png — grouped bars: accuracy + macro-F1 for all models × stages
+  07_confusion_matrices.png   — OOF confusion matrices for tuned classifier(s)
+  08_holdout_comparison.png   — CV vs holdout for winning clf (XGBoost) and reg (RF)
 
 Usage:
   python scripts/visualize.py
@@ -396,6 +398,83 @@ def plot_confusion_matrices(oof_df: pd.DataFrame, out_dir: Path, fmt: str):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Figure 8: CV vs holdout for winning models
+# ─────────────────────────────────────────────────────────────────────────────
+
+def plot_holdout_comparison(
+    holdout_clf: pd.DataFrame | None,
+    holdout_reg: pd.DataFrame | None,
+    final: pd.DataFrame | None,
+    out_dir: Path,
+    fmt: str,
+):
+    """
+    Two-panel figure: left = clf macro-F1 (CV vs holdout), right = reg MAE (CV vs holdout).
+    Confirms generalization: holdout performance is consistent with CV.
+    """
+    CV_COLOR      = "#4C72B0"
+    HOLDOUT_COLOR = "#55A868"
+
+    fig, axes = plt.subplots(1, 2, figsize=(10, 4.5))
+
+    # ── Left: Classification macro-F1 ─────────────────────────────────────────
+    ax = axes[0]
+    if holdout_clf is not None and final is not None:
+        model_name = holdout_clf["model"].iloc[0]
+        tuned_rows = final[final["stage"].str.contains("tuned", na=False)]
+        clf_row    = tuned_rows[tuned_rows["model"] == model_name]["macro_f1"].dropna()
+        cv_f1      = float(clf_row.iloc[0]) if not clf_row.empty else None
+        ho_f1      = float(holdout_clf["macro_f1"].iloc[0])
+
+        labels = ["CV (OOF)", "Holdout"]
+        vals   = [cv_f1 if cv_f1 is not None else 0, ho_f1]
+        colors = [CV_COLOR, HOLDOUT_COLOR]
+        bars   = ax.bar(labels, vals, color=colors, width=0.45)
+        for bar, v in zip(bars, vals):
+            ax.text(bar.get_x() + bar.get_width() / 2, v + 0.01,
+                    f"{v:.3f}", ha="center", va="bottom", fontsize=12, fontweight="bold")
+        ax.set_ylim(0, 1.0)
+        ax.set_ylabel("Macro-F1")
+        ax.set_title(f"Classification ({model_name})\nCV vs Holdout — Macro-F1")
+        ax.axhline(0.8, linestyle="--", color="grey", linewidth=0.8, alpha=0.5)
+    else:
+        ax.text(0.5, 0.5, "holdout_report.csv\nnot found",
+                ha="center", va="center", transform=ax.transAxes)
+
+    # ── Right: Regression MAE ─────────────────────────────────────────────────
+    ax = axes[1]
+    if holdout_reg is not None and final is not None:
+        model_name = holdout_reg["model"].iloc[0]
+        tuned_rows = final[final["stage"].str.contains("tuned", na=False)]
+        reg_row    = tuned_rows[tuned_rows["model"] == model_name]["blast_mae"].dropna()
+        cv_mae     = float(reg_row.iloc[0]) if not reg_row.empty else None
+        ho_mae     = float(holdout_reg["mae"].iloc[0])
+
+        labels = ["CV (OOF)", "Holdout"]
+        vals   = [cv_mae if cv_mae is not None else 0, ho_mae]
+        colors = [CV_COLOR, HOLDOUT_COLOR]
+        bars   = ax.bar(labels, vals, color=colors, width=0.45)
+        for bar, v in zip(bars, vals):
+            ax.text(bar.get_x() + bar.get_width() / 2, v + 0.02,
+                    f"{v:.3f}", ha="center", va="bottom", fontsize=12, fontweight="bold")
+        ax.set_ylabel("MAE (services)")
+        ax.set_title(f"Regression ({model_name})\nCV vs Holdout — MAE")
+        if "r2" in holdout_reg.columns:
+            r2 = float(holdout_reg["r2"].iloc[0])
+            ax.text(0.97, 0.95, f"Holdout R² = {r2:.3f}",
+                    transform=ax.transAxes, ha="right", fontsize=9,
+                    bbox=dict(boxstyle="round,pad=0.3", facecolor="wheat", alpha=0.6))
+    else:
+        ax.text(0.5, 0.5, "holdout_regression_report.csv\nnot found",
+                ha="center", va="center", transform=ax.transAxes)
+
+    fig.suptitle("Winning Models — Cross-Validation vs Independent Holdout Test Set",
+                 fontsize=13)
+    plt.tight_layout()
+    _save(fig, out_dir, "08_holdout_comparison", fmt)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Main
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -409,11 +488,13 @@ def main(res_dir: Path, out_dir: Path, fmt: str, stage: str = "fe_tuned"):
     logger.info("Reading results from %s", tuned_dir)
 
     # Load available data files from the correct stage subdirectories
-    final     = _load(tuned_dir, "final_results.csv")
-    feat_imp  = _load(fe_dir,    "feature_importance.csv")
-    acc_t     = _load(fe_dir,    "accuracy_vs_time.csv")
-    acc_t_tu  = _load(tuned_dir, "accuracy_vs_time_tuned.csv")
-    oof_preds = _load(tuned_dir, "oof_predictions.csv")
+    final       = _load(tuned_dir, "final_results.csv")
+    feat_imp    = _load(fe_dir,    "feature_importance.csv")
+    acc_t       = _load(fe_dir,    "accuracy_vs_time.csv")
+    acc_t_tu    = _load(tuned_dir, "accuracy_vs_time_tuned.csv")
+    oof_preds   = _load(tuned_dir, "oof_predictions.csv")
+    holdout_clf = _load(tuned_dir, "holdout_report.csv")
+    holdout_reg = _load(tuned_dir, "holdout_regression_report.csv")
 
     # ── Figure 1: Stage progression ──────────────────────────────────────────
     if final is not None:
@@ -446,6 +527,12 @@ def main(res_dir: Path, out_dir: Path, fmt: str, stage: str = "fe_tuned"):
         plot_confusion_matrices(oof_preds, out_dir, fmt)
     else:
         logger.warning("oof_predictions.csv missing — run: python scripts/tune_model.py --eval-only")
+
+    # ── Figure 8: CV vs holdout comparison ───────────────────────────────────
+    if holdout_clf is not None or holdout_reg is not None:
+        plot_holdout_comparison(holdout_clf, holdout_reg, final, out_dir, fmt)
+    else:
+        logger.warning("holdout_report.csv / holdout_regression_report.csv missing")
 
     logger.info("\nAll figures saved to %s/", out_dir)
 
