@@ -12,6 +12,7 @@ Figures:
   06_full_model_comparison.png — grouped bars: accuracy + macro-F1 for all models × stages
   07_confusion_matrices.png   — OOF confusion matrices for tuned classifier(s)
   08_holdout_comparison.png   — CV vs holdout for winning clf (XGBoost) and reg (RF)
+  09_optuna_convergence.png   — Bayesian search trial values + best-so-far curves
 
 Usage:
   python scripts/visualize.py
@@ -475,6 +476,67 @@ def plot_holdout_comparison(
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Figure 9: Optuna convergence curves
+# ─────────────────────────────────────────────────────────────────────────────
+
+_MODEL_SHORT = {"rf": "RandomForest", "xgb": "XGBoost", "lgbm": "LightGBM"}
+
+def plot_optuna_convergence(res_dir: Path, out_dir: Path, fmt: str):
+    """
+    Two-panel convergence plot built from trial_history_*.csv files saved by tune_model.py.
+    Auto-discovers files across all stage subdirectories under res_dir.
+    Left: classification (macro-F1, maximize); Right: regression (MAE, minimize).
+    """
+    clf_histories: dict[str, pd.DataFrame] = {}
+    reg_histories: dict[str, pd.DataFrame] = {}
+
+    for csv_path in sorted(res_dir.glob("*/trial_history_*.csv")):
+        # filename pattern: trial_history_{model}_{task}.csv
+        parts = csv_path.stem.split("_")  # ["trial","history","xgb","clf"]
+        if len(parts) < 4:
+            continue
+        task  = parts[-1]
+        model = _MODEL_SHORT.get(parts[-2], parts[-2])
+        df    = pd.read_csv(csv_path)
+        if task == "clf":
+            clf_histories[model] = df
+        elif task == "reg":
+            reg_histories[model] = df
+
+    if not clf_histories and not reg_histories:
+        logger.warning("No trial_history_*.csv files found — skipping figure 09")
+        return
+
+    fig, axes = plt.subplots(1, 2, figsize=(12, 5))
+
+    for ax, histories, ylabel, direction_label in [
+        (axes[0], clf_histories, "Macro-F1",       "classification — maximize"),
+        (axes[1], reg_histories, "MAE (services)",  "regression — minimize"),
+    ]:
+        if not histories:
+            ax.text(0.5, 0.5, "No trial history found",
+                    ha="center", va="center", transform=ax.transAxes)
+            ax.set_title(f"Optuna Convergence\n({direction_label})")
+            continue
+
+        for model, df in sorted(histories.items()):
+            color = MODEL_COLORS.get(model, "#888888")
+            ax.scatter(df["number"], df["value"],
+                       alpha=0.25, s=14, color=color)
+            ax.plot(df["number"], df["best_so_far"],
+                    linewidth=2, color=color, label=model)
+
+        ax.set_xlabel("Trial Number")
+        ax.set_ylabel(ylabel)
+        ax.set_title(f"Optuna Convergence\n({direction_label})")
+        ax.legend()
+
+    fig.suptitle("Bayesian Hyperparameter Search — 50 Trials per Model", fontsize=13)
+    plt.tight_layout()
+    _save(fig, out_dir, "09_optuna_convergence", fmt)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Main
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -533,6 +595,9 @@ def main(res_dir: Path, out_dir: Path, fmt: str, stage: str = "fe_tuned"):
         plot_holdout_comparison(holdout_clf, holdout_reg, final, out_dir, fmt)
     else:
         logger.warning("holdout_report.csv / holdout_regression_report.csv missing")
+
+    # ── Figure 9: Optuna convergence ─────────────────────────────────────────
+    plot_optuna_convergence(res_dir, out_dir, fmt)
 
     logger.info("\nAll figures saved to %s/", out_dir)
 

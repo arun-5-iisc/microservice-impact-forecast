@@ -298,7 +298,9 @@ def _save_study_plots(study: optuna.Study, name: str, plots_dir: Path) -> None:
         logger.warning("  kaleido not installed — skipping plots. "
                        "Install with: pip install kaleido")
     except Exception as exc:
-        logger.warning("  Plot export failed (%s): %s", name, exc)
+        import traceback
+        logger.warning("  Plot export failed (%s): %s\n%s",
+                       name, exc, traceback.format_exc())
 
 
 def _save_trial_history(study: optuna.Study, direction: str, path: Path) -> None:
