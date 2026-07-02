@@ -9,13 +9,21 @@ to provide empirical evidence for the severity thresholds defined in preprocess.
   ERROR_RATE_MEDIUM    = 0.01 (>1%   error rate → Medium)
 
 Outputs (saved to results/threshold_analysis/ and uploaded to GCS):
-  threshold_summary.csv       — percentile statistics per severity class
-  latency_delta_dist.png      — latency delta distribution by severity class
-  error_rate_dist.png         — error rate distribution by severity class
-  latency_delta_kde.png       — KDE plot showing threshold positions
-  feature_boxplots.png        — box plots of key features by severity class
-  class_distribution.png      — severity class counts and proportions
-  correlation_heatmap.png     — feature correlation heatmap
+  dataset_overview.csv        — experiment/feature/class inventory (EDA §1)
+  missing_values.csv/.png     — per-feature missingness (EDA §2)
+  class_distribution.png      — severity class counts and proportions (EDA §3)
+  blast_radius_dist.png       — regression target distribution (EDA §3)
+  threshold_summary.csv       — percentile statistics per severity class (EDA §3)
+  latency_delta_dist.png      — latency delta distribution by severity class (EDA §3)
+  error_rate_dist.png         — error rate distribution by severity class (EDA §3)
+  latency_delta_kde.png       — KDE plot showing threshold positions (EDA §3)
+  time_evolution.png/.csv     — proactive signal build-up across T=15–60s (EDA §4)
+  feature_boxplots.png        — box plots of key features by severity class (EDA §4)
+  correlation_heatmap.png     — Spearman feature correlation heatmap (EDA §5)
+  threshold_confusion_table.csv — actual severity vs latency band (EDA §5)
+  sensitivity_analysis.csv/.png — threshold stability analysis (EDA §5)
+  coverage_table.csv          — fault/service diversity per severity class (EDA §5)
+  feature_justification.csv   — per-feature rationale + Spearman correlations (EDA §6)
 
 Usage (on VM):
   python scripts/threshold_analysis.py
@@ -485,6 +493,244 @@ def sensitivity_analysis(df: pd.DataFrame, out_dir: Path):
         )
 
 
+# ── A. Dataset overview ───────────────────────────────────────────────────────
+
+def dataset_overview(df: pd.DataFrame, out_dir: Path) -> dict:
+    """EDA §1: experiment and feature inventory."""
+    exp_df = df.drop_duplicates(subset="experiment_id")
+    label_cols = {"severity", "blast_radius_final", "final_latency_delta",
+                  "experiment_id", "latency_observable"}
+    summary = {
+        "total_rows":        len(df),
+        "total_experiments": exp_df["experiment_id"].nunique(),
+        "total_features":    len([c for c in df.columns if c not in label_cols]),
+        "services":          exp_df["service"].nunique(),
+        "fault_types":       exp_df["fault_type"].nunique(),
+        "time_snapshots":    df["time_into_fault_s"].nunique(),
+    }
+    for sev in SEVERITY_ORDER:
+        sev_exp = exp_df[exp_df["severity"] == sev]
+        summary[f"experiments_{sev}"] = len(sev_exp)
+        summary[f"rows_{sev}"]        = len(df[df["severity"] == sev])
+
+    pd.DataFrame([summary]).to_csv(out_dir / "dataset_overview.csv", index=False)
+    logger.info("Dataset overview:\n%s",
+                "\n".join(f"  {k}: {v}" for k, v in summary.items()))
+    return summary
+
+
+# ── B. Missing value analysis ─────────────────────────────────────────────────
+
+def missing_value_analysis(df: pd.DataFrame, out_dir: Path):
+    """EDA §2: per-feature missingness — bar chart + CSV."""
+    miss_pct = (df.isnull().sum() / len(df) * 100).sort_values(ascending=False)
+    miss_pct = miss_pct[miss_pct > 0]
+    if miss_pct.empty:
+        logger.info("No missing values found.")
+        return
+
+    miss_df = pd.DataFrame({
+        "feature":       miss_pct.index,
+        "missing_pct":   miss_pct.values.round(2),
+        "missing_count": df[miss_pct.index].isnull().sum().values,
+    })
+    miss_df.to_csv(out_dir / "missing_values.csv", index=False)
+    logger.info("Missing value summary:\n%s", miss_df.to_string(index=False))
+
+    colors = ["#C43235" if p > 30 else "#DD8452" if p > 5 else "#4C72B0"
+              for p in miss_df["missing_pct"]]
+    fig, ax = plt.subplots(figsize=(8, max(4, len(miss_df) * 0.4)))
+    bars = ax.barh(miss_df["feature"], miss_df["missing_pct"], color=colors)
+    for bar, pct, cnt in zip(bars, miss_df["missing_pct"], miss_df["missing_count"]):
+        ax.text(bar.get_width() + 0.5, bar.get_y() + bar.get_height() / 2,
+                f"{pct:.1f}% ({cnt})", va="center", fontsize=9)
+    ax.set_xlabel("Missing (%)")
+    ax.set_xlim(0, miss_df["missing_pct"].max() * 1.3)
+    ax.set_title("Missing Values per Feature\n"
+                 "(red >30%: structural — uninstrumented services; "
+                 "orange >5%: incidental)")
+    plt.tight_layout()
+    path = out_dir / "missing_values.png"
+    fig.savefig(path, bbox_inches="tight")
+    plt.close(fig)
+    logger.info("Saved → %s", path)
+
+
+# ── C. Blast radius distribution ──────────────────────────────────────────────
+
+def plot_blast_radius_dist(df: pd.DataFrame, out_dir: Path):
+    """EDA §3: regression target distribution — overall histogram + by severity."""
+    col = "blast_radius_final"
+    if col not in df.columns:
+        logger.warning("plot_blast_radius_dist: '%s' not in dataset", col)
+        return
+
+    exp_df = df.drop_duplicates(subset="experiment_id")
+    vals   = exp_df[col].dropna()
+
+    fig, axes = plt.subplots(1, 2, figsize=(12, 4.5))
+
+    bins = range(0, int(vals.max()) + 2)
+    axes[0].hist(vals, bins=bins, color="#4C72B0", alpha=0.8, edgecolor="white", align="left")
+    axes[0].axvline(vals.mean(),   color="red",    linestyle="--", linewidth=1.8,
+                    label=f"Mean = {vals.mean():.2f}")
+    axes[0].axvline(vals.median(), color="orange", linestyle="--", linewidth=1.8,
+                    label=f"Median = {vals.median():.1f}")
+    axes[0].set_xlabel("Blast Radius (# services affected)")
+    axes[0].set_ylabel("Experiments")
+    axes[0].set_title("Blast Radius Final — Overall Distribution")
+    axes[0].legend()
+
+    data = [exp_df[exp_df["severity"] == sev][col].dropna().values for sev in SEVERITY_ORDER]
+    bp   = axes[1].boxplot(data, patch_artist=True, tick_labels=SEVERITY_ORDER)
+    for patch, sev in zip(bp["boxes"], SEVERITY_ORDER):
+        patch.set_facecolor(SEVERITY_COLORS[sev])
+        patch.set_alpha(0.7)
+    axes[1].set_xlabel("Severity Class")
+    axes[1].set_ylabel("Blast Radius Final")
+    axes[1].set_title("Blast Radius Final by Severity Class")
+
+    fig.suptitle("Regression Target: Blast Radius Final\n"
+                 "(services whose latency rose >10% during fault vs baseline)",
+                 fontsize=12, y=1.02)
+    plt.tight_layout()
+    path = out_dir / "blast_radius_dist.png"
+    fig.savefig(path, bbox_inches="tight")
+    plt.close(fig)
+    logger.info("Saved → %s", path)
+
+
+# ── D. Time evolution — proactive signal build-up ─────────────────────────────
+
+def plot_time_evolution(df: pd.DataFrame, out_dir: Path):
+    """
+    EDA §4: the central proactive argument.
+
+    Plots mean ± 1 std of target_latency_delta and target_error_rate per
+    severity class across T ∈ {15, 30, 45, 60} seconds.  Clear class
+    separation at T=15s is the empirical case for early detectability.
+    """
+    time_col = "time_into_fault_s"
+    if time_col not in df.columns:
+        logger.warning("plot_time_evolution: '%s' not in dataset", time_col)
+        return
+
+    T_vals = sorted(df[time_col].unique())
+
+    fig, axes = plt.subplots(1, 2, figsize=(13, 5))
+    for ax, feat, ylabel, title in [
+        (axes[0], "target_latency_delta", "Mean Latency Delta (fraction of baseline)",
+         "Latency Signal Separation Across Observation Windows"),
+        (axes[1], "target_error_rate",    "Mean Error Rate",
+         "Error Rate Separation Across Observation Windows"),
+    ]:
+        if feat not in df.columns:
+            continue
+        for sev in SEVERITY_ORDER:
+            means, stds = [], []
+            for T in T_vals:
+                vals = df[(df["severity"] == sev) & (df[time_col] == T)][feat].dropna()
+                means.append(vals.mean() if len(vals) else np.nan)
+                stds.append(vals.std()   if len(vals) else np.nan)
+            means = np.array(means, dtype=float)
+            stds  = np.array(stds,  dtype=float)
+            ax.plot(T_vals, means, "o-", color=SEVERITY_COLORS[sev],
+                    label=sev, linewidth=2.2, markersize=7)
+            ax.fill_between(T_vals, means - stds, means + stds,
+                            color=SEVERITY_COLORS[sev], alpha=0.12)
+        ax.set_xlabel("Time into Fault Phase (seconds)")
+        ax.set_ylabel(ylabel)
+        ax.set_title(title)
+        ax.set_xticks(T_vals)
+        ax.legend(title="Severity")
+
+    fig.suptitle(
+        "Proactive Signal Build-Up: Feature Separation Across Observation Windows\n"
+        "(separation at T=15s confirms early detectability; shaded band = ±1 std)",
+        fontsize=12, y=1.02,
+    )
+    plt.tight_layout()
+    path = out_dir / "time_evolution.png"
+    fig.savefig(path, bbox_inches="tight")
+    plt.close(fig)
+    logger.info("Saved → %s", path)
+
+    rows = []
+    for feat in ["target_latency_delta", "target_error_rate"]:
+        if feat not in df.columns:
+            continue
+        for sev in SEVERITY_ORDER:
+            for T in T_vals:
+                vals = df[(df["severity"] == sev) & (df[time_col] == T)][feat].dropna()
+                rows.append({
+                    "feature":          feat,
+                    "severity":         sev,
+                    "time_into_fault_s": T,
+                    "mean":             round(vals.mean(), 4) if len(vals) else None,
+                    "std":              round(vals.std(),  4) if len(vals) else None,
+                    "n":                len(vals),
+                })
+    pd.DataFrame(rows).to_csv(out_dir / "time_evolution.csv", index=False)
+    logger.info("Saved → %s", out_dir / "time_evolution.csv")
+
+
+# ── E. Feature justification table ───────────────────────────────────────────
+
+def feature_justification_table(df: pd.DataFrame, out_dir: Path):
+    """
+    EDA §6: per-feature rationale with Spearman correlations vs severity and
+    blast_radius_final.  Saved as CSV for direct use in the dissertation.
+    """
+    plot_df = df.copy()
+    plot_df["severity_encoded"] = plot_df["severity"].map({"Low": 0, "Medium": 1, "High": 2})
+
+    FEATURE_META = {
+        "target_latency_delta":   ("trace",      "Relative latency change — primary degradation signal"),
+        "target_error_rate":      ("trace",      "Error span fraction — direct user-visible impact"),
+        "target_request_rate":    ("trace",      "Request throughput; drops signal cascading failure"),
+        "target_cpu":             ("prometheus", "Pod CPU; spikes precede OOMKill and latency faults"),
+        "target_cpu_delta":       ("prometheus", "Normalised CPU change from baseline"),
+        "target_memory_bytes":    ("prometheus", "Pod memory; pressure leads to OOM restarts"),
+        "target_memory_delta":    ("prometheus", "Normalised memory change from baseline"),
+        "target_replicas":        ("prometheus", "0 = service unavailable → guaranteed High"),
+        "target_restart_count":   ("prometheus", "Container restarts under fault → guaranteed High"),
+        "system_cpu_mean":        ("prometheus", "Cluster-wide CPU; captures coordinated degradation"),
+        "system_memory_mean":     ("prometheus", "Cluster-wide memory; baseline load context"),
+        "blast_radius_early":     ("trace",      "Upstream propagation count; quantifies cascade scope"),
+        "max_trace_depth":        ("trace",      "Trace depth; long chains amplify tail latency"),
+        "time_into_fault_s":      ("context",    "Observation window — enables proactive formulation"),
+        "fault_value_numeric":    ("context",    "Fault magnitude; distinguishes mild vs severe injection"),
+    }
+
+    rows = []
+    for feat, (category, rationale) in FEATURE_META.items():
+        if feat not in plot_df.columns:
+            continue
+        miss_pct = round(plot_df[feat].isnull().mean() * 100, 1)
+        aligned  = plot_df[[feat, "severity_encoded", "blast_radius_final"]].dropna()
+        sev_corr = br_corr = None
+        if len(aligned) > 10:
+            sev_corr = round(
+                aligned[[feat, "severity_encoded"]].corr(method="spearman").iloc[0, 1], 3)
+            br_corr  = round(
+                aligned[[feat, "blast_radius_final"]].corr(method="spearman").iloc[0, 1], 3)
+        rows.append({
+            "feature":              feat,
+            "category":             category,
+            "spearman_vs_severity": sev_corr,
+            "spearman_vs_blast_r":  br_corr,
+            "missing_pct":          miss_pct,
+            "rationale":            rationale,
+        })
+
+    result = pd.DataFrame(rows)
+    path   = out_dir / "feature_justification.csv"
+    result.to_csv(path, index=False)
+    logger.info("Feature justification table:\n%s",
+                result[["feature", "spearman_vs_severity", "missing_pct"]].to_string(index=False))
+    return result
+
+
 # ── Main ───────────────────────────────────────────────────────────────────────
 
 def main(data_path: Path, upload_prefix: str | None):
@@ -498,23 +744,43 @@ def main(data_path: Path, upload_prefix: str | None):
     logger.info("\nSeverity distribution:\n%s",
                 df["severity"].value_counts().reindex(SEVERITY_ORDER).to_string())
 
-    # ── Threshold summary ─────────────────────────────────────────────────────
+    # ── Threshold summary (EDA §3 — percentile stats per class) ──────────────
     logger.info("Computing threshold summary…")
     summary = threshold_summary(df)
     summary.to_csv(OUT_DIR / "threshold_summary.csv", index=False)
     logger.info("\nThreshold summary:\n%s", summary.to_string(index=False))
 
-    # ── Plots ─────────────────────────────────────────────────────────────────
-    logger.info("Generating plots…")
+    # ── EDA §1: Dataset overview ──────────────────────────────────────────────
+    logger.info("EDA §1 — dataset overview…")
+    dataset_overview(df, OUT_DIR)
+
+    # ── EDA §2: Missing values ────────────────────────────────────────────────
+    logger.info("EDA §2 — missing value analysis…")
+    missing_value_analysis(df, OUT_DIR)
+
+    # ── EDA §3: Target distributions ─────────────────────────────────────────
+    logger.info("EDA §3 — target distributions…")
     plot_class_distribution(df, OUT_DIR)
+    plot_blast_radius_dist(df, OUT_DIR)
     plot_latency_delta_dist(df, OUT_DIR)
     plot_error_rate_dist(df, OUT_DIR)
+
+    # ── EDA §4: Feature behaviour ─────────────────────────────────────────────
+    logger.info("EDA §4 — feature behaviour…")
+    plot_time_evolution(df, OUT_DIR)
     plot_latency_kde(df, OUT_DIR)
     plot_feature_boxplots(df, OUT_DIR)
+
+    # ── EDA §5: Feature relationships ─────────────────────────────────────────
+    logger.info("EDA §5 — feature relationships…")
     plot_correlation_heatmap(df, OUT_DIR)
     threshold_confusion_table(df, OUT_DIR)
     coverage_table(df, OUT_DIR)
     sensitivity_analysis(df, OUT_DIR)
+
+    # ── EDA §6: Feature justification ─────────────────────────────────────────
+    logger.info("EDA §6 — feature justification…")
+    feature_justification_table(df, OUT_DIR)
 
     # ── Print key findings ────────────────────────────────────────────────────
     logger.info("\n%s\nKEY THRESHOLD FINDINGS\n%s", "="*55, "="*55)
