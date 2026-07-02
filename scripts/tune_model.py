@@ -55,6 +55,7 @@ from sklearn.metrics import (
     classification_report,
     f1_score,
     mean_absolute_error,
+    r2_score,
 )
 from sklearn.model_selection import GroupKFold
 from sklearn.pipeline import Pipeline
@@ -605,8 +606,10 @@ def main(data_path: Path, stage: str, clf_model: str, reg_model: str,
             round(reg_metrics["mae_mean"], 4),
             round(reg_metrics["rmse_mean"], 4),
         ))
-        logger.info("  %s reg tuned → MAE=%.3f  RMSE=%.3f",
-                    _LABELS[reg_model], reg_metrics["mae_mean"], reg_metrics["rmse_mean"])
+        logger.info("  %s reg tuned → MAE=%.4f±%.4f  RMSE=%.4f±%.4f",
+                    _LABELS[reg_model],
+                    reg_metrics["mae_mean"],  reg_metrics["mae_std"],
+                    reg_metrics["rmse_mean"], reg_metrics["rmse_std"])
 
     # ── Save results ──────────────────────────────────────────────────────────
     final_df = pd.DataFrame(final_rows, columns=PRIOR_COLS)
@@ -661,13 +664,17 @@ def main(data_path: Path, stage: str, clf_model: str, reg_model: str,
         if reg_path.exists():
             pipe   = joblib.load(reg_path)
             y_pred = pipe.predict(X_test)
-            mae    = mean_absolute_error(y_reg_test, y_pred)
-            rmse   = float(np.sqrt(np.mean((y_reg_test - y_pred) ** 2)))
+            mae  = mean_absolute_error(y_reg_test, y_pred)
+            rmse = float(np.sqrt(np.mean((y_reg_test - y_pred) ** 2)))
+            r2   = r2_score(y_reg_test, y_pred)
             pd.DataFrame([{
-                "model": _LABELS[reg_model], "mae": round(mae, 4), "rmse": round(rmse, 4),
+                "model": _LABELS[reg_model],
+                "mae":  round(mae,  4),
+                "rmse": round(rmse, 4),
+                "r2":   round(r2,   4),
             }]).to_csv(results_dir / "holdout_regression_report.csv", index=False)
-            logger.info("  %s reg holdout → MAE=%.3f  RMSE=%.3f",
-                        _LABELS[reg_model], mae, rmse)
+            logger.info("  %s reg holdout → MAE=%.4f  RMSE=%.4f  R²=%.4f",
+                        _LABELS[reg_model], mae, rmse, r2)
 
     logger.info("\nDone. Models → %s/", models_dir)
 
