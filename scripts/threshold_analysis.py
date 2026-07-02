@@ -67,19 +67,28 @@ plt.rcParams.update({
 
 def threshold_summary(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Percentile statistics for latency_delta and error_rate per severity class.
-    Shows where thresholds sit in the actual data distribution.
+    Percentile statistics per severity class for:
+      - final_latency_delta : value used for labeling (last 60s of fault phase)
+      - target_latency_delta: early-window feature (T=15-60s into fault)
+      - target_error_rate   : early-window error rate feature
+
+    final_latency_delta is the primary validation column — thresholds were
+    applied to this value, so class separation here is the empirical justification.
+    target_latency_delta shows how early the signal appears (proactive value).
     """
     rows = []
     for sev in SEVERITY_ORDER:
         sdf = df[df["severity"] == sev]
         for col, thresholds in [
+            ("final_latency_delta",  [LATENCY_DELTA_MEDIUM, LATENCY_DELTA_HIGH]),
             ("target_latency_delta", [LATENCY_DELTA_MEDIUM, LATENCY_DELTA_HIGH]),
             ("target_error_rate",    [ERROR_RATE_MEDIUM,    ERROR_RATE_HIGH]),
         ]:
             if col not in df.columns:
                 continue
             vals = sdf[col].dropna()
+            if vals.empty:
+                continue
             rows.append({
                 "severity":  sev,
                 "feature":   col,
