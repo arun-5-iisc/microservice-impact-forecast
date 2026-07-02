@@ -8,7 +8,8 @@ Writes: dataset/processed/training_dataset_fe.csv
 Feature groups added
 ────────────────────
 1. Service topology      — structural position in the Online Boutique call graph
-                           (service_depth, service_downstream_count, service_is_gateway)
+                           (service_depth, service_downstream_count,
+                            service_upstream_count, service_is_gateway)
 2. Fault severity ratio  — fault magnitude normalised by original resource limit
                            (fault_severity_ratio)
 3. Log transforms        — log1p of skewed numerical features
