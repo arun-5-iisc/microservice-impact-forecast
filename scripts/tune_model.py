@@ -318,36 +318,23 @@ PRIOR_COLS = ["stage", "model", "accuracy", "macro_f1", "Low_f1",
 
 # Fallback numbers used only when Stage 0 / Stage 1 CSVs are absent.
 # These will be replaced by actual CSV results at runtime once those stages run.
-_PRIOR_RESULTS_FALLBACK = [
-    # stage, model, accuracy, macro_f1, Low_f1, Medium_f1, High_f1, blast_mae, blast_rmse
-    ("baseline", "RandomForest", 0.697,  0.610, 0.758, 0.266, 0.807, 1.639, 2.016),
-    ("baseline", "XGBoost",      0.722,  0.634, 0.757, 0.329, 0.814, 1.717, 2.116),
-    ("baseline", "LightGBM",     0.758,  0.684, 0.781, 0.414, 0.857, 1.642, 2.055),
-    ("fe",       "RandomForest", 0.753,  0.690, 0.755, 0.432, 0.885, 1.549, 1.946),
-    ("fe",       "XGBoost",      0.736,  0.661, 0.737, 0.403, 0.842, 1.662, 2.108),
-    ("fe",       "LightGBM",     0.744,  0.669, 0.758, 0.392, 0.857, 1.613, 2.017),
-]
-
-
 def _load_prior_results() -> list[tuple]:
     """Load Stage 0 and Stage 1 results from CSV files.
 
     Reads results/<stage>/classification_report.csv and regression_report.csv
-    for both 'baseline' and 'fe' stages. Falls back to _PRIOR_RESULTS_FALLBACK
-    when the files do not yet exist (i.e. Stage 0/1 have not run yet).
+    for both 'baseline' and 'fe' stages. Raises RuntimeError if either stage's
+    CSVs are missing — run train_model.py --stage baseline and --stage fe first.
     """
     rows = []
+    missing = []
     for stage_key in ("baseline", "fe"):
         clf_path = RESULTS_DIR / stage_key / "classification_report.csv"
         reg_path = RESULTS_DIR / stage_key / "regression_report.csv"
         if not clf_path.exists() or not reg_path.exists():
+            missing.append(stage_key)
             continue
-        try:
-            clf_df = pd.read_csv(clf_path)
-            reg_df = pd.read_csv(reg_path)
-        except Exception as exc:
-            logger.warning("Could not read prior results for stage '%s': %s", stage_key, exc)
-            continue
+        clf_df = pd.read_csv(clf_path)
+        reg_df = pd.read_csv(reg_path)
 
         for _, clf_row in clf_df.iterrows():
             model = clf_row["model"]
@@ -369,15 +356,14 @@ def _load_prior_results() -> list[tuple]:
                 float(reg_row["rmse_mean"]),
             ))
 
-    if rows:
-        logger.info("Loaded %d prior result rows from Stage 0/1 CSVs", len(rows))
-        return rows
+    if missing:
+        raise RuntimeError(
+            f"Stage {missing} result CSVs not found. "
+            "Run train_model.py --stage baseline and --stage fe before tuning."
+        )
 
-    logger.warning(
-        "Stage 0/1 result CSVs not found — using fallback prior results. "
-        "Run train_model.py --stage baseline and --stage fe first."
-    )
-    return list(_PRIOR_RESULTS_FALLBACK)
+    logger.info("Loaded %d prior result rows from Stage 0/1 CSVs", len(rows))
+    return rows
 
 
 # ─────────────────────────────────────────────────────────────────────────────
