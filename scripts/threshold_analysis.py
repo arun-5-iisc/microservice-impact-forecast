@@ -322,7 +322,55 @@ def plot_correlation_heatmap(df: pd.DataFrame, out_dir: Path):
     logger.info("Saved → %s", path)
 
 
-# ── 8. Coverage table ─────────────────────────────────────────────────────────
+# ── 8. Threshold confusion table ──────────────────────────────────────────────
+
+def threshold_confusion_table(df: pd.DataFrame, out_dir: Path):
+    """
+    Cross-tabulates actual severity label against the latency band that
+    final_latency_delta falls into. Shows how well latency thresholds alone
+    explain the assigned labels, and explicitly accounts for experiments where
+    High was triggered by non-latency signals (replicas=0, restarts, error_rate).
+
+    Operates at experiment level to avoid 4x row inflation.
+    Only includes experiments where final_latency_delta is measurable.
+    """
+    col = "final_latency_delta"
+    if col not in df.columns:
+        logger.warning("threshold_confusion_table: '%s' not in dataset", col)
+        return
+
+    exp_df = df.drop_duplicates(subset="experiment_id").copy()
+
+    def latency_band(v):
+        if pd.isna(v):
+            return "no_data"
+        if v > LATENCY_DELTA_HIGH:
+            return f"> {LATENCY_DELTA_HIGH} (High band)"
+        if v > LATENCY_DELTA_MEDIUM:
+            return f"{LATENCY_DELTA_MEDIUM}–{LATENCY_DELTA_HIGH} (Medium band)"
+        return f"< {LATENCY_DELTA_MEDIUM} (Low band)"
+
+    exp_df["latency_band"] = exp_df[col].apply(latency_band)
+
+    band_order = [
+        f"< {LATENCY_DELTA_MEDIUM} (Low band)",
+        f"{LATENCY_DELTA_MEDIUM}–{LATENCY_DELTA_HIGH} (Medium band)",
+        f"> {LATENCY_DELTA_HIGH} (High band)",
+        "no_data",
+    ]
+
+    table = pd.crosstab(
+        exp_df["severity"],
+        exp_df["latency_band"],
+    ).reindex(index=SEVERITY_ORDER, columns=band_order, fill_value=0)
+
+    csv_path = out_dir / "threshold_confusion_table.csv"
+    table.to_csv(csv_path)
+    logger.info("Threshold confusion table (experiments):\n%s", table.to_string())
+    return table
+
+
+# ── 9. Coverage table ─────────────────────────────────────────────────────────
 
 def coverage_table(df: pd.DataFrame, out_dir: Path):
     """
@@ -464,6 +512,7 @@ def main(data_path: Path, upload_prefix: str | None):
     plot_latency_kde(df, OUT_DIR)
     plot_feature_boxplots(df, OUT_DIR)
     plot_correlation_heatmap(df, OUT_DIR)
+    threshold_confusion_table(df, OUT_DIR)
     coverage_table(df, OUT_DIR)
     sensitivity_analysis(df, OUT_DIR)
 
