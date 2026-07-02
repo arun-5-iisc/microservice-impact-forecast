@@ -83,22 +83,26 @@ def _shap_plots(pipe, X_transformed: np.ndarray, feature_names: list[str],
         logger.error("SHAP TreeExplainer failed: %s", exc)
         return
 
-    # For multiclass (3 severity classes), shap_values is a list of arrays.
-    # Use class index 2 (High) for the summary — most interesting for the dissertation.
+    # SHAP multiclass output varies by version:
+    #   Old API: list of 2D arrays [(n_samples, n_features), ...] one per class
+    #   New API: 3D numpy array (n_samples, n_features, n_classes)
+    # Normalise to a list of 2D arrays so the rest of the code is uniform.
+    if isinstance(shap_values, np.ndarray) and shap_values.ndim == 3:
+        shap_values = [shap_values[:, :, i] for i in range(shap_values.shape[2])]
+
     if isinstance(shap_values, list):
-        # Pick the class with the largest overall effect for the summary
-        mean_abs = [np.abs(sv).mean() for sv in shap_values]
+        mean_abs    = [np.abs(sv).mean() for sv in shap_values]
         primary_idx = int(np.argmax(mean_abs))
         sv_primary  = shap_values[primary_idx]
         class_label = SEVERITY_ORDER[primary_idx]
         logger.info("  Multiclass SHAP — showing class '%s' (largest effect)", class_label)
     else:
         sv_primary  = shap_values
+        primary_idx = 0
         class_label = "prediction"
 
     plots_dir.mkdir(parents=True, exist_ok=True)
-    shap_df = pd.DataFrame(shap_values[primary_idx] if isinstance(shap_values, list) else shap_values,
-                           columns=feature_names)
+    shap_df = pd.DataFrame(sv_primary, columns=feature_names)
     shap_df.to_csv(plots_dir / "shap_values.csv", index=False)
 
     # ── Beeswarm summary plot ─────────────────────────────────────────────────
