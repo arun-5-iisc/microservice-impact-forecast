@@ -36,7 +36,6 @@ LATENCY_DELTA_HIGH   = 1.0    # >100% increase → High
 LATENCY_DELTA_MEDIUM = 0.20   # >20%  increase → Medium
 ERROR_RATE_HIGH      = 0.05
 ERROR_RATE_MEDIUM    = 0.01
-MIN_LATENCY_HIGH_MS  = 500    # explicit latency faults: 500ms+ → at least Medium
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -217,30 +216,33 @@ def _blast_radius(traces: dict, target: str, t_start: float, t_end: float,
 # Severity label
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _compute_severity(fault_type: str, fault_value: str,
-                      latency_delta: float | None, error_rate: float,
-                      restart_count: float | None) -> str:
-    if fault_type == "replicas" and fault_value == "0":
+def _compute_severity(latency_delta: float | None, error_rate: float,
+                      restart_count: float | None, replicas: float | None) -> str:
+    """
+    Observation-based severity label derived entirely from runtime signals,
+    not from fault configuration inputs.
+
+    Priority (highest to lowest):
+      1. replicas == 0        → service unavailable          → High
+      2. restart_count > 0    → pod crashed under this fault → High
+      3. error_rate thresholds → direct user-visible impact
+      4. latency_delta thresholds → relative degradation from baseline
+    """
+    if replicas is not None and replicas == 0:
         return "High"
 
-    if fault_type == "latency":
-        try:
-            ms = float(fault_value)
-        except (TypeError, ValueError):
-            ms = 0
-        if ms >= 1000:
-            return "High"
-        if ms >= 500:
-            return "Medium"
-
-    restarted = restart_count is not None and restart_count > 0
-    if restarted:
+    if restart_count is not None and restart_count > 0:
         return "High"
+
+    if error_rate > ERROR_RATE_HIGH:
+        return "High"
+    if error_rate > ERROR_RATE_MEDIUM:
+        return "Medium"
 
     if latency_delta is not None:
-        if latency_delta > LATENCY_DELTA_HIGH or error_rate > ERROR_RATE_HIGH:
+        if latency_delta > LATENCY_DELTA_HIGH:
             return "High"
-        if latency_delta > LATENCY_DELTA_MEDIUM or error_rate > ERROR_RATE_MEDIUM:
+        if latency_delta > LATENCY_DELTA_MEDIUM:
             return "Medium"
 
     return "Low"
@@ -302,9 +304,10 @@ def process_experiment(exp_dir: Path) -> list[dict]:
     final_error_rate   = final_feats.get("error_rate", 0.0)
     final_prom         = _prom_snapshot(prom, service, fault_end)
     final_restart      = final_prom.get("restart_count")
+    final_replicas     = final_prom.get("replicas")
     blast_radius_final = _blast_radius(traces, service, label_start, fault_end, base_latencies)
     severity           = _compute_severity(
-        fault_type, fault_value, final_lat_delta, final_error_rate, final_restart
+        final_lat_delta, final_error_rate, final_restart, final_replicas
     )
 
     # ── One row per T ─────────────────────────────────────────────────────────
