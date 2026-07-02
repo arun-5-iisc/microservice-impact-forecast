@@ -71,6 +71,7 @@ CATEGORICAL_FEATURES = ["fault_type", "service", "traffic_level"]
 
 # Base numeric features (always present in training_dataset.csv)
 BASE_NUMERIC_FEATURES = [
+    "latency_observable",
     "fault_value_numeric",
     "time_into_fault_s",
     "target_cpu",
@@ -95,10 +96,6 @@ FE_NUMERIC_FEATURES = [
     "service_downstream_count",
     "service_is_gateway",
     "fault_severity_ratio",
-    "log_target_latency_mean_ms",
-    "log_target_memory_bytes",
-    "log_fault_value_numeric",
-    "signed_log_latency_delta",
     "system_error_rate",
     "system_latency_ratio",
 ]
@@ -141,7 +138,7 @@ def _classifiers():
         "XGBoost": XGBClassifier(
             n_estimators=300, max_depth=6, learning_rate=0.05,
             eval_metric="mlogloss", random_state=42,
-            verbosity=0, use_label_encoder=False,
+            verbosity=0,
         ),
         "LightGBM": LGBMClassifier(
             n_estimators=300, max_depth=-1, learning_rate=0.05,
@@ -318,42 +315,63 @@ def _evaluate_regressor(name, estimator, X, y, groups, numeric_features):
 # Main
 # ─────────────────────────────────────────────────────────────────────────────
 
-def main(data_path: Path):
-    MODELS_DIR.mkdir(parents=True, exist_ok=True)
-    RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+def main(data_path: Path, stage: str):
+    models_dir  = MODELS_DIR  / stage
+    results_dir = RESULTS_DIR / stage
+    models_dir.mkdir(parents=True, exist_ok=True)
+    results_dir.mkdir(parents=True, exist_ok=True)
 
+    logger.info("Stage: %s  →  models=%s  results=%s", stage, models_dir, results_dir)
     logger.info("Loading dataset from %s", data_path)
     df = pd.read_csv(data_path)
     logger.info("Dataset: %d rows, %d experiments", len(df), df["experiment_id"].nunique())
 
+    # ── Exclude holdout experiments (locked until final Stage 2 evaluation) ────
+    holdout_path = REPO_ROOT / "dataset" / "processed" / "holdout_ids.txt"
+    if holdout_path.exists():
+        holdout_ids = set(holdout_path.read_text().strip().splitlines())
+        df_train    = df[~df["experiment_id"].isin(holdout_ids)].reset_index(drop=True)
+        logger.info(
+            "Holdout locked: using %d training experiments (%d rows)  "
+            "(%d holdout experiments excluded)",
+            df_train["experiment_id"].nunique(), len(df_train),
+            df["experiment_id"].isin(holdout_ids).sum() // 4,
+        )
+    else:
+        logger.warning(
+            "holdout_ids.txt not found — using all data for training. "
+            "Run: python scripts/create_holdout.py"
+        )
+        df_train = df.reset_index(drop=True)
+
     # Detect which feature columns are present (FE dataset has extra cols)
-    numeric_features = [c for c in BASE_NUMERIC_FEATURES + FE_NUMERIC_FEATURES if c in df.columns]
+    numeric_features = [c for c in BASE_NUMERIC_FEATURES + FE_NUMERIC_FEATURES if c in df_train.columns]
     all_features     = numeric_features + CATEGORICAL_FEATURES
-    is_fe_dataset    = any(c in df.columns for c in FE_NUMERIC_FEATURES)
+    is_fe_dataset    = any(c in df_train.columns for c in FE_NUMERIC_FEATURES)
     logger.info(
         "Feature set: %d numeric + %d categorical (%s)",
         len(numeric_features), len(CATEGORICAL_FEATURES),
         "FE dataset" if is_fe_dataset else "baseline dataset",
     )
 
-    X      = df[all_features]
-    groups = df["experiment_id"].values
+    X_train  = df_train[all_features]
+    groups   = df_train["experiment_id"].values
 
     # ── Task 1: Severity Classification ──────────────────────────────────────
     logger.info("\n%s\nTask 1: Severity Classification\n%s", "="*55, "="*55)
 
     le = LabelEncoder()
     le.classes_ = np.array(SEVERITY_ORDER)
-    y_cls = le.transform(df["severity"])
+    y_cls = le.transform(df_train["severity"])
 
     clf_rows = []
     feat_imp_cls = {}
-    best_oof_preds = None   # OOF predictions from LightGBM (best macro-F1) for time analysis
+    best_oof_preds = None
     best_oof_true  = None
 
     # ── Rule-based baseline (no ML) ───────────────────────────────────────────
     logger.info("Evaluating rule-based baseline (latency thresholds only)…")
-    rule_report = _evaluate_rule_baseline(df)
+    rule_report = _evaluate_rule_baseline(df_train)
     rule_row = {"model": "RuleBaseline"}
     for cls in SEVERITY_ORDER:
         rule_row[f"{cls}_f1"] = round(rule_report[cls]["f1-score"], 4)
@@ -373,10 +391,9 @@ def main(data_path: Path):
     for name, estimator in _classifiers().items():
         logger.info("Training %s classifier...", name)
         pipe, report, imp, preds, true = _evaluate_classifier(
-            name, estimator, X, y_cls, groups, le, numeric_features
+            name, estimator, X_train, y_cls, groups, le, numeric_features
         )
-        joblib.dump(pipe, MODELS_DIR / f"clf_{name.lower()}.joblib")
-        # Keep LightGBM OOF preds for the time-into-fault analysis (best model)
+        joblib.dump(pipe, models_dir / f"clf_{name.lower()}.joblib")
         if name == "LightGBM":
             best_oof_preds = preds
             best_oof_true  = true
@@ -403,21 +420,24 @@ def main(data_path: Path):
         )
 
     clf_df = pd.DataFrame(clf_rows)
-    clf_df.to_csv(RESULTS_DIR / "classification_report.csv", index=False)
-    logger.info("\nClassification results:\n%s", clf_df.to_string(index=False))
+    clf_df.to_csv(results_dir / "classification_report.csv", index=False)
+    logger.info("\nClassification results (5-fold CV on training set):\n%s",
+                clf_df.to_string(index=False))
 
     # ── Task 2: Blast Radius Regression ──────────────────────────────────────
     logger.info("\n%s\nTask 2: Blast Radius Regression\n%s", "="*55, "="*55)
 
-    y_reg = df["blast_radius_final"].values.astype(float)
+    y_reg = df_train["blast_radius_final"].values.astype(float)
 
     reg_rows = []
     feat_imp_reg = {}
 
     for name, estimator in _regressors().items():
         logger.info("Training %s regressor...", name)
-        pipe, metrics, imp = _evaluate_regressor(name, estimator, X, y_reg, groups, numeric_features)
-        joblib.dump(pipe, MODELS_DIR / f"reg_{name.lower()}.joblib")
+        pipe, metrics, imp = _evaluate_regressor(
+            name, estimator, X_train, y_reg, groups, numeric_features
+        )
+        joblib.dump(pipe, models_dir / f"reg_{name.lower()}.joblib")
 
         row = {"model": name, **{k: round(v, 4) for k, v in metrics.items()}}
         reg_rows.append(row)
@@ -433,7 +453,7 @@ def main(data_path: Path):
         )
 
     reg_df = pd.DataFrame(reg_rows)
-    reg_df.to_csv(RESULTS_DIR / "regression_report.csv", index=False)
+    reg_df.to_csv(results_dir / "regression_report.csv", index=False)
     logger.info("\nRegression results:\n%s", reg_df.to_string(index=False))
 
     # ── Feature Importance ────────────────────────────────────────────────────
@@ -445,19 +465,17 @@ def main(data_path: Path):
             imp_records.append({"model": model_name, "feature": feat, "importance": round(score, 6)})
 
     imp_df = pd.DataFrame(imp_records)
-    imp_df.to_csv(RESULTS_DIR / "feature_importance.csv", index=False)
+    imp_df.to_csv(results_dir / "feature_importance.csv", index=False)
 
-    # Print top 10 by RandomForest (most interpretable)
     if "RandomForest" in feat_imp_cls:
         top10 = feat_imp_cls["RandomForest"].head(10)
         logger.info("\nTop 10 features (RandomForest classifier):\n%s", top10.to_string())
 
-    # ── Accuracy vs Time into Fault ───────────────────────────────────────────
-    # Uses LightGBM OOF predictions (never seen training data) to avoid leakage.
+    # ── Accuracy vs Time into Fault (OOF on training set) ────────────────────
     logger.info("\n%s\nAccuracy vs Time-into-fault (LightGBM OOF)\n%s", "="*55, "="*55)
 
     t_rows = []
-    t_values = df["time_into_fault_s"].values
+    t_values = df_train["time_into_fault_s"].values
     for T in [15, 30, 45, 60]:
         mask = t_values == T
         if mask.sum() == 0:
@@ -468,13 +486,17 @@ def main(data_path: Path):
         t_rows.append({"time_into_fault_s": T, "accuracy": round(acc, 4), "macro_f1": round(f1, 4)})
         logger.info("  T=%2ds → accuracy=%.3f  macro-F1=%.3f", T, acc, f1)
 
-    pd.DataFrame(t_rows).to_csv(RESULTS_DIR / "accuracy_vs_time.csv", index=False)
+    pd.DataFrame(t_rows).to_csv(results_dir / "accuracy_vs_time.csv", index=False)
 
-    logger.info("\nAll outputs saved to %s/ and %s/", RESULTS_DIR, MODELS_DIR)
+    logger.info("\nAll outputs saved to %s/ and %s/", results_dir, models_dir)
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Train impact forecasting models")
-    parser.add_argument("--data", type=Path, default=DEFAULT_DATA)
+    parser.add_argument("--data",  type=Path, default=DEFAULT_DATA)
+    parser.add_argument("--stage", type=str,  default=None,
+                        help="Output subdirectory name (e.g. baseline, fe). "
+                             "Auto-detected from filename if omitted.")
     args = parser.parse_args()
-    main(args.data)
+    stage = args.stage or ("fe" if "fe" in args.data.stem else "baseline")
+    main(args.data, stage)

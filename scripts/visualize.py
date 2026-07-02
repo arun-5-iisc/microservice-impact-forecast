@@ -27,6 +27,7 @@ import matplotlib.patches as mpatches
 import numpy as np
 import pandas as pd
 import seaborn as sns
+from sklearn.metrics import confusion_matrix
 
 logging.basicConfig(
     level=logging.INFO,
@@ -40,9 +41,9 @@ DEFAULT_RES  = REPO_ROOT / "results"
 DEFAULT_OUT  = REPO_ROOT / "results" / "plots"
 
 # ── Shared style ──────────────────────────────────────────────────────────────
-STAGE_ORDER  = ["baseline", "fe", "tuned_fe"]
-STAGE_LABELS = {"baseline": "Baseline", "fe": "Feature\nEngineering", "tuned_fe": "Tuned (FE)"}
-STAGE_COLORS = {"baseline": "#4C72B0", "fe": "#DD8452", "tuned_fe": "#55A868"}
+STAGE_ORDER  = ["baseline", "fe", "fe_tuned"]
+STAGE_LABELS = {"baseline": "Baseline", "fe": "Feature\nEngineering", "fe_tuned": "Tuned (FE)"}
+STAGE_COLORS = {"baseline": "#4C72B0", "fe": "#DD8452", "fe_tuned": "#55A868"}
 
 MODEL_COLORS = {
     "RandomForest": "#4C72B0",
@@ -236,7 +237,7 @@ def plot_accuracy_vs_time(baseline_t: pd.DataFrame | None, tuned_t: pd.DataFrame
                           .values[0] if T in baseline_t["time_into_fault_s"].values else np.nan
                 for T in T_vals]
         ax.plot(T_vals, vals, marker="o", linewidth=2, color="#4C72B0",
-                label="Baseline – LightGBM", linestyle="--")
+                label="FE default – LightGBM", linestyle="--")
 
     if tuned_t is not None:
         for model, color, ls in [
@@ -341,25 +342,84 @@ def plot_full_model_comparison(df: pd.DataFrame, out_dir: Path, fmt: str):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Figure 7: Confusion matrices for tuned models
+# ─────────────────────────────────────────────────────────────────────────────
+
+def plot_confusion_matrices(oof_df: pd.DataFrame, out_dir: Path, fmt: str):
+    """
+    Side-by-side confusion matrices for tuned classifier models (OOF predictions).
+    """
+    CLASSES  = ["Low", "Medium", "High"]
+    _PALETTES = ["Blues", "Greens", "Oranges", "Purples"]
+    models   = sorted(oof_df["model"].unique())
+    titles   = [f"Tuned {m}" for m in models]
+    colors   = [_PALETTES[i % len(_PALETTES)] for i in range(len(models))]
+
+    n = max(len(models), 1)
+    fig, axes = plt.subplots(1, n, figsize=(5.5 * n, 4.5))
+    if n == 1:
+        axes = [axes]
+
+    for ax, model, title, cmap in zip(axes, models, titles, colors):
+        mdf = oof_df[oof_df["model"] == model]
+        if mdf.empty:
+            ax.set_visible(False)
+            continue
+
+        cm = confusion_matrix(mdf["true_label"], mdf["pred_label"], labels=CLASSES)
+        cm_norm = cm.astype(float) / cm.sum(axis=1, keepdims=True)
+
+        im = ax.imshow(cm_norm, interpolation="nearest", cmap=cmap, vmin=0, vmax=1)
+        plt.colorbar(im, ax=ax, shrink=0.8, label="Proportion")
+
+        ax.set_xticks(range(len(CLASSES)))
+        ax.set_yticks(range(len(CLASSES)))
+        ax.set_xticklabels(CLASSES)
+        ax.set_yticklabels(CLASSES)
+        ax.set_xlabel("Predicted Label")
+        ax.set_ylabel("True Label")
+        ax.set_title(title)
+
+        # Annotate cells with count and proportion
+        for i in range(len(CLASSES)):
+            for j in range(len(CLASSES)):
+                count = cm[i, j]
+                prop  = cm_norm[i, j]
+                color = "white" if prop > 0.5 else "black"
+                ax.text(j, i, f"{count}\n({prop:.0%})",
+                        ha="center", va="center", fontsize=11,
+                        color=color, fontweight="bold")
+
+    fig.suptitle(f"Confusion Matrices — Tuned Models (OOF Predictions)", fontsize=13, y=1.02)
+    plt.tight_layout()
+    _save(fig, out_dir, "07_confusion_matrices", fmt)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Main
 # ─────────────────────────────────────────────────────────────────────────────
 
-def main(res_dir: Path, out_dir: Path, fmt: str):
+def main(res_dir: Path, out_dir: Path, fmt: str, stage: str = "fe_tuned"):
     _apply_style()
 
-    logger.info("Reading results from %s", res_dir)
+    # tuned_dir: results/<stage>/  — final_results.csv, oof, accuracy_vs_time_tuned
+    # fe_dir:    results/<fe>/     — feature_importance, accuracy_vs_time
+    tuned_dir = res_dir / stage
+    fe_dir    = res_dir / stage.replace("_tuned", "")
+    logger.info("Reading results from %s", tuned_dir)
 
-    # Load available data files
-    final    = _load(res_dir, "final_results.csv")
-    feat_imp = _load(res_dir, "feature_importance.csv")
-    acc_t    = _load(res_dir, "accuracy_vs_time.csv")
-    acc_t_tu = _load(res_dir, "accuracy_vs_time_tuned.csv")
+    # Load available data files from the correct stage subdirectories
+    final     = _load(tuned_dir, "final_results.csv")
+    feat_imp  = _load(fe_dir,    "feature_importance.csv")
+    acc_t     = _load(fe_dir,    "accuracy_vs_time.csv")
+    acc_t_tu  = _load(tuned_dir, "accuracy_vs_time_tuned.csv")
+    oof_preds = _load(tuned_dir, "oof_predictions.csv")
 
     # ── Figure 1: Stage progression ──────────────────────────────────────────
     if final is not None:
         plot_stage_progression(final, out_dir, fmt)
     else:
-        logger.warning("final_results.csv missing — run: python scripts/tune_model.py --eval-only")
+        logger.warning("final_results.csv missing — run: python scripts/tune_model.py")
 
     # ── Figure 2: Per-class F1 heatmap ───────────────────────────────────────
     if final is not None:
@@ -381,16 +441,26 @@ def main(res_dir: Path, out_dir: Path, fmt: str):
     if final is not None:
         plot_full_model_comparison(final, out_dir, fmt)
 
+    # ── Figure 7: Confusion matrices ─────────────────────────────────────────
+    if oof_preds is not None:
+        plot_confusion_matrices(oof_preds, out_dir, fmt)
+    else:
+        logger.warning("oof_predictions.csv missing — run: python scripts/tune_model.py --eval-only")
+
     logger.info("\nAll figures saved to %s/", out_dir)
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Generate dissertation visualizations")
     parser.add_argument("--results", type=Path, default=DEFAULT_RES,
-                        help="Directory containing results CSVs")
+                        help="Root results/ directory (default: results/)")
+    parser.add_argument("--stage",   type=str,  default="fe_tuned",
+                        help="Tuned-stage sub-directory under results/ "
+                             "(default: fe_tuned). FE files are loaded from "
+                             "results/<stage without _tuned>/.")
     parser.add_argument("--out",     type=Path, default=DEFAULT_OUT,
                         help="Output directory for plots")
     parser.add_argument("--format",  choices=["png", "pdf", "svg"], default="png",
                         help="Output file format (default: png)")
     args = parser.parse_args()
-    main(args.results, args.out, args.format)
+    main(args.results, args.out, args.format, stage=args.stage)

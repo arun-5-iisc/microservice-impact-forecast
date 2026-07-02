@@ -15,7 +15,7 @@ import argparse
 from pathlib import Path
 
 from pptx import Presentation
-from pptx.util import Inches, Pt, Emu
+from pptx.util import Inches, Pt
 from pptx.dml.color import RGBColor
 from pptx.enum.text import PP_ALIGN
 from pptx.util import Inches, Pt
@@ -227,14 +227,17 @@ def slide_agenda(prs):
 
     items = [
         "Problem Statement & Motivation",
+        "Dataset Design Rationale — Why Controlled Experiments?",
         "Research Objectives",
         "System Architecture & Experimental Setup",
         "Dataset Overview",
+        "How Severity is Calculated",
         "Three-Stage ML Pipeline",
         "Stage 1 – Baseline Models",
         "Stage 2 – Feature Engineering",
         "Stage 3 – Hyperparameter Tuning (Optuna)",
         "Results: Severity Classification",
+        "Confusion Matrix — Tuned Models",
         "Results: Blast Radius Regression",
         "Proactive Window Analysis",
         "Key Findings & Contributions",
@@ -276,6 +279,74 @@ def slide_problem(prs):
                      left=6.8, top=1.4, width=6.0, height=5.6)
 
 
+def slide_dataset_rationale(prs):
+    slide = prs.slides.add_slide(prs.slide_layouts[6])
+    _header_bar(slide, "Dataset Design Rationale",
+                "Why controlled experiments instead of a public dataset?")
+
+    # ── Left column ───────────────────────────────────────────────────────────
+    _add_rect(slide, 0.35, 1.4, 6.0, 0.38, BLUE)
+    _add_textbox(slide, "Why not a public dataset?",
+                 left=0.35, top=1.4, width=6.0, height=0.38,
+                 font_size=13, bold=True, color=WHITE)
+    _bullet_list(slide, [
+        "No public benchmark combines Jaeger traces + Prometheus metrics "
+        "+ fault-injection ground truth at microservice granularity",
+        "Existing SRE datasets (AIOps challenge, Google SRE) contain only "
+        "aggregated alerts — no per-service trace telemetry or proactive labels",
+        "Real production telemetry is proprietary — companies do not publish "
+        "incident data with full observability signals",
+    ], left=0.35, top=1.82, width=6.0, height=2.0, font_size=12)
+
+    _add_rect(slide, 0.35, 3.9, 6.0, 0.38, ORANGE)
+    _add_textbox(slide, "Scope boundary — 10 of 12 services targeted",
+                 left=0.35, top=3.9, width=6.0, height=0.38,
+                 font_size=13, bold=True, color=WHITE)
+    _bullet_list(slide, [
+        "redis-cart excluded — stateful store, not HTTP/gRPC; failure is "
+        "binary (up/down), incompatible with gradual degradation at T=15–60s",
+        "loadgenerator excluded — Locust traffic generator, not part of the "
+        "application under test; faulting it would corrupt the experiment",
+    ], left=0.35, top=4.32, width=6.0, height=1.6, font_size=12)
+
+    # ── Right column ──────────────────────────────────────────────────────────
+    _add_rect(slide, 6.7, 1.4, 6.2, 0.38, GREEN)
+    _add_textbox(slide, "Why controlled injection gives better ground truth",
+                 left=6.7, top=1.4, width=6.2, height=0.38,
+                 font_size=13, bold=True, color=WHITE)
+    _bullet_list(slide, [
+        "In production, faults are mitigated before full propagation — "
+        "true final severity is never observed",
+        "Controlled injection lets the fault run its full lifecycle (60+ s), "
+        "so severity and blast_radius_final are computed from what actually happened",
+        "fault_start is precisely known — essential for the proactive window "
+        "formulation at T = 15, 30, 45, 60 s",
+    ], left=6.7, top=1.82, width=6.2, height=2.0, font_size=12)
+
+    _add_rect(slide, 6.7, 3.9, 6.2, 0.38, _rgb(0x70, 0x30, 0xA0))
+    _add_textbox(slide, "Why Online Boutique on GKE?",
+                 left=6.7, top=3.9, width=6.2, height=0.38,
+                 font_size=13, bold=True, color=WHITE)
+    _bullet_list(slide, [
+        "12-service polyglot application — representative of real-world "
+        "microservice architectures",
+        "Open-source and reproducible — any researcher can replicate using "
+        "the same Helm chart and fault parameters",
+        "Covers four realistic fault types: CPU throttle, memory limit, "
+        "latency injection, replica scale-down",
+    ], left=6.7, top=4.32, width=6.2, height=1.6, font_size=12)
+
+    # ── Viva one-liner ────────────────────────────────────────────────────────
+    _add_rect(slide, 0.35, 6.1, 12.55, 0.88, BLUE)
+    _add_textbox(slide,
+                 '"No public dataset captures distributed trace telemetry, per-service resource '
+                 'metrics, and fault-injection ground truth simultaneously; controlled experiments '
+                 'on GKE were the only way to construct a dataset where fault timing, severity '
+                 'labels, and blast radius are all precisely known and reproducible."',
+                 left=0.45, top=6.13, width=12.35, height=0.82,
+                 font_size=11, italic=True, color=WHITE, align=PP_ALIGN.CENTER)
+
+
 def slide_objectives(prs):
     slide = prs.slides.add_slide(prs.slide_layouts[6])
     _header_bar(slide, "Research Objectives")
@@ -314,10 +385,11 @@ def slide_architecture(prs):
                  left=0.4, top=1.4, width=4.5, height=0.4,
                  font_size=14, bold=True, color=BLUE)
     _bullet_list(slide, [
-        "GKE Standard cluster (n1-standard-4 nodes)",
+        "GKE Standard cluster — failure-forecast",
         "Online Boutique — 12 polyglot microservices",
         "Helm release: online-boutique (namespace: online-boutique)",
-        "Fault injection via kubectl patch (Helm values override)",
+        "Fault injection: Helm upgrade (cpu / memory / replicas) + "
+        "Chaos Mesh NetworkChaos v2.6.3 (latency)",
     ], left=0.4, top=1.8, width=4.5, height=2.2, font_size=13)
 
     _add_textbox(slide, "Observability Stack",
@@ -339,11 +411,12 @@ def slide_dataset(prs):
     _header_bar(slide, "Dataset Overview", "Controlled fault injection experiments on GKE")
 
     _bullet_list(slide, [
-        "89 fault-injection experiments across 10 target microservices",
+        "129 fault-injection experiments across 10 target microservices "
+        "(89 initial + 40 supplementary to complete full coverage)",
         "4 fault types: cpu throttle, memory limit, latency injection, replica scale-down",
-        "3 traffic levels: low, medium, high (Locust load generator)",
+        "2 traffic levels: normal (10 users) and high (25 users) via Locust load generator",
         "4 snapshot times per experiment: T = 15, 30, 45, 60 s into fault",
-        "356 total rows (89 experiments × 4 time snapshots)",
+        "~516 total rows (129 experiments × 4 time snapshots)",
         "Labels: severity class (Low / Medium / High) + blast_radius_final (regression)",
     ], left=0.4, top=1.4, width=6.0, height=3.2, font_size=14)
 
@@ -362,6 +435,66 @@ def slide_dataset(prs):
 
     _placeholder_box(slide, "Fault Type Distribution / Experiment Grid",
                      left=6.5, top=1.4, width=6.4, height=5.6)
+
+
+def slide_severity_calculation(prs):
+    slide = prs.slides.add_slide(prs.slide_layouts[6])
+    _header_bar(slide, "How Severity is Calculated",
+                "Rule-based labelling from the final 60 s of each experiment")
+
+    # ── Intro line ────────────────────────────────────────────────────────────
+    _add_textbox(slide,
+                 "At the end of each experiment, two signals are measured from the last 60 s of traces:",
+                 left=0.4, top=1.4, width=12.5, height=0.38,
+                 font_size=13, color=BLACK)
+    _bullet_list(slide, [
+        "latency_delta  =  (final latency − baseline latency) / baseline latency",
+        "error_rate  =  fraction of requests that failed",
+    ], left=0.4, top=1.78, width=12.5, height=0.7, font_size=13)
+
+    # ── Rules table ───────────────────────────────────────────────────────────
+    _add_textbox(slide, "Priority Rules (checked top to bottom — first match wins)",
+                 left=0.4, top=2.58, width=12.5, height=0.38,
+                 font_size=13, bold=True, color=BLUE)
+
+    _table_slide(slide,
+                 headers=["Priority", "Condition", "Severity"],
+                 rows=[
+                     ["1", "fault_type = replicas  AND  fault_value = 0  (complete outage)", "High"],
+                     ["2", "fault_type = latency  AND  injected delay ≥ 1000 ms",            "High"],
+                     ["3", "fault_type = latency  AND  injected delay ≥ 500 ms",             "Medium"],
+                     ["4", "Pod restarted  (restart_count > 0)",                              "High"],
+                     ["5", "latency_delta > 100%  OR  error_rate > 5%",                      "High"],
+                     ["6", "latency_delta > 20%   OR  error_rate > 1%",                      "Medium"],
+                     ["7", "None of the above triggered",                                     "Low"],
+                 ],
+                 left=0.4, top=2.96, width=12.5,
+                 col_widths=[1.1, 9.4, 2.0])
+
+    # ── Concrete examples ─────────────────────────────────────────────────────
+    _add_textbox(slide, "Concrete Examples",
+                 left=0.4, top=5.3, width=12.5, height=0.38,
+                 font_size=13, bold=True, color=BLUE)
+
+    examples = [
+        ("High", GREEN,
+         "Baseline: 200 ms\nFinal 60 s: 600 ms\nlatency_delta = (600−200)/200 = 200%\n→ Rule 5 triggers → High"),
+        ("Medium", ORANGE,
+         "Baseline: 200 ms\nFinal 60 s: 260 ms\nlatency_delta = (260−200)/200 = 30%\n→ Rule 6 triggers → Medium"),
+        ("Low", BLUE,
+         "Baseline: 200 ms\nFinal 60 s: 210 ms\nlatency_delta = (210−200)/200 = 5%\n→ No rule triggers → Low"),
+    ]
+
+    for i, (label, color, body) in enumerate(examples):
+        x = 0.4 + i * 4.25
+        _add_rect(slide, x, 5.68, 3.9, 0.35, color)
+        _add_textbox(slide, label,
+                     left=x, top=5.68, width=3.9, height=0.35,
+                     font_size=13, bold=True, color=WHITE, align=PP_ALIGN.CENTER)
+        _add_rect(slide, x, 6.03, 3.9, 1.2, GREY_BG)
+        _add_textbox(slide, body,
+                     left=x + 0.1, top=6.06, width=3.7, height=1.15,
+                     font_size=11, color=BLACK)
 
 
 def slide_pipeline_overview(prs):
@@ -498,6 +631,7 @@ def slide_fe_results(prs):
                            "Medium F1", "High F1", "Blast MAE"],
                  rows=[
                      ["Baseline", "RandomForest", "69.7%", "0.610", "0.758", "0.266", "0.807", "1.639"],
+                     ["Baseline", "XGBoost",      "72.2%", "0.634", "0.757", "0.329", "0.814", "1.717"],
                      ["Baseline", "LightGBM",     "75.8%", "0.684", "0.781", "0.414", "0.857", "1.642"],
                      ["FE",       "RandomForest", "75.3%", "0.690", "0.755", "0.432", "0.885", "1.549"],
                      ["FE",       "XGBoost",      "73.6%", "0.661", "0.737", "0.403", "0.842", "1.662"],
@@ -551,8 +685,17 @@ def slide_tuning(prs):
                  left=6.4, top=1.8, width=6.5, height=2.4,
                  font_size=12)
 
+    _add_textbox(slide,
+                 "Note: XGBoost was evaluated in Stages 1 and 2 but excluded from tuning. "
+                 "LightGBM is a more efficient and consistently stronger gradient boosting "
+                 "variant — tuning both would be redundant given LightGBM already outperformed "
+                 "XGBoost at baseline. RandomForest was retained as the representative "
+                 "bagging model.",
+                 left=0.4, top=4.1, width=12.5, height=0.7,
+                 font_size=11, italic=True, color=ORANGE)
+
     _add_textbox(slide, "Tuning Improvements (50 trials)",
-                 left=0.4, top=4.35, width=12.5, height=0.38,
+                 left=0.4, top=4.85, width=12.5, height=0.38,
                  font_size=14, bold=True, color=BLUE)
     _table_slide(slide,
                  headers=["Model", "Task", "Metric", "Before Tuning", "After Tuning", "Improvement"],
@@ -560,9 +703,9 @@ def slide_tuning(prs):
                      ["RandomForest", "Classification", "Macro-F1", "0.690", "0.708", "+2.6%"],
                      ["RandomForest", "Regression",     "MAE",      "1.549", "1.495", "−3.5%"],
                      ["LightGBM",     "Classification", "Macro-F1", "0.684", "0.710", "+3.8%"],
-                     ["LightGBM",     "Regression",     "MAE",      "1.642", "1.473", "−10.3%"],
+                     ["LightGBM",     "Regression",     "MAE",      "1.642", "1.473", "−8.7%"],
                  ],
-                 left=0.4, top=4.75, width=12.5,
+                 left=0.4, top=5.23, width=12.5,
                  col_widths=[2.1, 2.0, 1.5, 2.0, 2.0, 2.0])
 
 
@@ -574,10 +717,14 @@ def slide_classification_results(prs):
     _table_slide(slide,
                  headers=["Stage", "Model", "Accuracy", "Macro-F1", "Low F1", "Medium F1", "High F1"],
                  rows=[
-                     ["Baseline",  "LightGBM",     "75.8%", "0.684", "0.781", "0.414", "0.857"],
+                     ["Baseline",  "RandomForest",  "69.7%", "0.610", "0.758", "0.266", "0.807"],
+                     ["Baseline",  "XGBoost",       "72.2%", "0.634", "0.757", "0.329", "0.814"],
+                     ["Baseline",  "LightGBM",      "75.8%", "0.684", "0.781", "0.414", "0.857"],
                      ["FE",        "RandomForest",  "75.3%", "0.690", "0.755", "0.432", "0.885"],
-                     ["Tuned FE",  "LightGBM",      "78.1%", "0.710", "0.792", "0.463", "0.876"],
+                     ["FE",        "XGBoost",       "73.6%", "0.661", "0.737", "0.403", "0.842"],
+                     ["FE",        "LightGBM",      "74.4%", "0.669", "0.758", "0.392", "0.857"],
                      ["Tuned FE",  "RandomForest",  "76.7%", "0.708", "0.769", "0.485", "0.871"],
+                     ["Tuned FE",  "LightGBM",      "78.1%", "0.710", "0.792", "0.463", "0.876"],
                  ],
                  left=0.4, top=1.45, width=12.5,
                  col_widths=[1.9, 2.0, 1.6, 1.5, 1.4, 1.6, 1.5])
@@ -586,6 +733,47 @@ def slide_classification_results(prs):
                      left=0.4, top=3.5, width=6.1, height=3.7)
     _placeholder_box(slide, "02_per_class_f1_heatmap.png — F1 heatmap by stage × class",
                      left=6.7, top=3.5, width=6.1, height=3.7)
+
+
+def slide_confusion_matrix(prs):
+    slide = prs.slides.add_slide(prs.slide_layouts[6])
+    _header_bar(slide, "Confusion Matrix — Tuned Models",
+                "OOF predictions across all 5 folds (GroupKFold by experiment_id)")
+
+    _placeholder_box(slide,
+                     "07_confusion_matrices.png — Side-by-side confusion matrices\n"
+                     "Tuned RandomForest (left)  |  Tuned LightGBM (right)",
+                     left=0.4, top=1.4, width=8.5, height=4.5)
+
+    _add_textbox(slide, "How to Read This",
+                 left=9.1, top=1.4, width=3.9, height=0.38,
+                 font_size=13, bold=True, color=BLUE)
+    _add_textbox(slide,
+                 "Each cell shows the count and proportion of predictions. "
+                 "Diagonal cells (top-left to bottom-right) are correct predictions. "
+                 "Off-diagonal cells are misclassifications.",
+                 left=9.1, top=1.82, width=3.9, height=1.3,
+                 font_size=12, color=BLACK)
+
+    _add_textbox(slide, "Key Observations",
+                 left=9.1, top=3.2, width=3.9, height=0.38,
+                 font_size=13, bold=True, color=BLUE)
+    _add_textbox(slide,
+                 "High and Low severity classes show the strongest diagonal values, "
+                 "confirming the model predicts extreme cases reliably. "
+                 "Medium class errors are concentrated at the Low/Medium and "
+                 "Medium/High boundaries — expected for a boundary class. "
+                 "Critically, misclassifications between Low and High (opposite corners) "
+                 "are minimal, showing the model understands the ordinal severity scale.",
+                 left=9.1, top=3.62, width=3.9, height=2.5,
+                 font_size=12, color=BLACK)
+
+    _add_rect(slide, 0.4, 6.05, 12.55, 0.42, BLUE)
+    _add_textbox(slide,
+                 "Errors between adjacent classes (Low↔Medium, Medium↔High) are "
+                 "acceptable — errors between distant classes (Low↔High) are near zero.",
+                 left=0.5, top=6.07, width=12.35, height=0.38,
+                 font_size=12, italic=True, color=WHITE, align=PP_ALIGN.CENTER)
 
 
 def slide_regression_results(prs):
@@ -607,17 +795,20 @@ def slide_regression_results(prs):
                  headers=["Stage", "Model", "MAE", "RMSE"],
                  rows=[
                      ["Baseline", "RandomForest", "1.639", "2.016"],
+                     ["Baseline", "XGBoost",      "1.717", "2.116"],
                      ["Baseline", "LightGBM",     "1.642", "2.055"],
                      ["FE",       "RandomForest", "1.549", "1.946"],
-                     ["Tuned FE", "LightGBM",     "1.473", "—"],
-                     ["Tuned FE", "RandomForest", "1.495", "—"],
+                     ["FE",       "XGBoost",      "1.662", "2.108"],
+                     ["FE",       "LightGBM",     "1.613", "2.017"],
+                     ["Tuned FE", "RandomForest", "1.495", "1.844"],
+                     ["Tuned FE", "LightGBM",     "1.473", "1.840"],
                  ],
                  left=0.4, top=4.15, width=5.8,
                  col_widths=[1.7, 1.8, 1.2, 1.1])
 
     _add_textbox(slide,
-                 "Best result: LightGBM tuned MAE = 1.473\n"
-                 "(−10.3% vs FE baseline; predictions within ~1.5 services of true value)",
+                 "Best result: LightGBM tuned — MAE = 1.473, RMSE = 1.840\n"
+                 "(−8.7% MAE vs FE LightGBM; predictions within ~1.5 services of true value)",
                  left=0.4, top=6.3, width=5.8, height=0.8,
                  font_size=12, italic=True, color=GREEN)
 
@@ -628,33 +819,39 @@ def slide_regression_results(prs):
 def slide_proactive_window(prs):
     slide = prs.slides.add_slide(prs.slide_layouts[6])
     _header_bar(slide, "Proactive Window Analysis",
-                "Accuracy at T = 15, 30, 45, 60 s into the fault phase")
+                "Can the model predict reliably from early fault signals alone?")
 
-    _add_textbox(slide, "Proactive Formulation",
+    _add_textbox(slide, "What This Analysis Measures",
                  left=0.4, top=1.4, width=5.8, height=0.38,
                  font_size=14, bold=True, color=BLUE)
-    _bullet_list(slide, [
-        "Features from early window: [fault_start → fault_start + T]",
-        "Label from final 60 s: severity class + blast_radius_final",
-        "Model predicts BEFORE impact fully propagates",
-        "T = 15 s → forecast 45 s before full severity is known",
-    ], left=0.4, top=1.8, width=5.8, height=2.2, font_size=13)
+    _add_textbox(slide,
+                 "Each experiment produces four snapshots at T = 15, 30, 45, and 60 seconds "
+                 "into the fault. This analysis evaluates model accuracy separately at each "
+                 "snapshot to determine how early a reliable prediction can be made — before "
+                 "the fault has fully propagated. At T = 15 s, the model has only 15 seconds "
+                 "of fault signals and must forecast an outcome that will not fully materialise "
+                 "for another 45 seconds.",
+                 left=0.4, top=1.82, width=5.8, height=2.1,
+                 font_size=13, color=BLACK)
 
     _table_slide(slide,
-                 headers=["Time (T)", "LightGBM Baseline", "RF Tuned", "LGBM Tuned"],
+                 headers=["Time (T)", "RF Tuned Acc.", "RF Tuned F1", "LGBM Tuned Acc.", "LGBM Tuned F1"],
                  rows=[
-                     ["T = 15 s", "~0.745", "—", "0.775"],
-                     ["T = 30 s", "~0.758", "—", "0.787"],
-                     ["T = 45 s", "~0.745", "—", "0.775"],
-                     ["T = 60 s", "~0.758", "—", "0.787"],
+                     ["T = 15 s", "0.787", "0.762", "0.775", "0.747"],
+                     ["T = 30 s", "0.764", "0.729", "0.787", "0.746"],
+                     ["T = 45 s", "0.764", "0.734", "0.775", "0.735"],
+                     ["T = 60 s", "0.753", "0.723", "0.787", "0.743"],
                  ],
-                 left=0.4, top=4.15, width=5.8,
-                 col_widths=[1.5, 2.0, 1.4, 1.9])
+                 left=0.4, top=4.05, width=5.8,
+                 col_widths=[1.2, 1.2, 1.1, 1.7, 1.6])
 
     _add_textbox(slide,
-                 "Key finding: accuracy is consistent across all T values — the model "
-                 "generalises even at T = 15 s (very early in the fault lifecycle).",
-                 left=0.4, top=6.3, width=5.8, height=0.8,
+                 "RandomForest achieves its highest accuracy at T = 15 s (78.7%) and remains "
+                 "stable, while LightGBM maintains consistent accuracy between 77.5% and 78.7% "
+                 "across all windows. Both models confirm that reliable forecasting is possible "
+                 "within the first 15 seconds of a fault — well before operators would typically "
+                 "receive a reactive alert.",
+                 left=0.4, top=5.9, width=5.8, height=1.35,
                  font_size=12, italic=True, color=GREEN)
 
     _placeholder_box(slide, "04_accuracy_vs_time.png — Proactive accuracy vs T (line chart)",
@@ -735,7 +932,7 @@ def slide_conclusion(prs):
         "Demonstrated that proactive ML-based impact forecasting is achievable on a real "
         "GKE microservice platform using only runtime observability",
         "Final best model: LightGBM (tuned) — 78.1% accuracy, 0.710 macro-F1, 1.473 MAE",
-        "All four fault types (cpu, memory, latency, replicas) predicted with consistent accuracy",
+        "129 experiments across 10 services, 4 fault types — complete service-fault coverage",
         "GroupKFold evaluation prevents temporal leakage — results are generalisable",
         "Open-source pipeline: preprocess → feature engineer → train → tune → visualise",
     ], left=0.4, top=1.8, width=5.8, height=3.0, font_size=13)
@@ -851,7 +1048,7 @@ def slide_future_rag_agent(prs):
                  left=0.35, top=1.95, width=5.95, height=0.32,
                  font_size=12, bold=True, color=ORANGE)
     _bullet_list(slide, [
-        "89 experiments embedded as vectors (service, fault_type, features, outcome)",
+        "129 experiments embedded as vectors (service, fault_type, features, outcome)",
         "Remediation runbooks (rollback steps per fault type)",
         "Online Boutique architecture docs (call graph, resource limits)",
         "results/final_results.csv — model performance history",
@@ -943,15 +1140,18 @@ def main(out_path: Path):
     slide_title(prs)
     slide_agenda(prs)
     slide_problem(prs)
+    slide_dataset_rationale(prs)
     slide_objectives(prs)
     slide_architecture(prs)
     slide_dataset(prs)
+    slide_severity_calculation(prs)
     slide_pipeline_overview(prs)
     slide_baseline(prs)
     slide_feature_engineering(prs)
     slide_fe_results(prs)
     slide_tuning(prs)
     slide_classification_results(prs)
+    slide_confusion_matrix(prs)
     slide_regression_results(prs)
     slide_proactive_window(prs)
     slide_feature_importance(prs)
