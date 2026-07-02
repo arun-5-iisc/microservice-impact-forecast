@@ -277,26 +277,34 @@ def _log_callback(name, direction):
 def _save_study_plots(study: optuna.Study, name: str, plots_dir: Path) -> None:
     """Save optimization history and hyperparameter importance plots as PNG.
 
-    Requires kaleido: pip install kaleido
+    Uses optuna.visualization.matplotlib — no kaleido or browser required.
     """
     try:
-        import optuna.visualization as ov
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+        from optuna.visualization.matplotlib import (
+            plot_optimization_history,
+            plot_param_importances,
+        )
+
         plots_dir.mkdir(parents=True, exist_ok=True)
         safe_name = name.replace("-", "_")
 
-        fig = ov.plot_optimization_history(study)
-        fig.update_layout(title=f"{name} — Optuna Convergence")
-        fig.write_image(str(plots_dir / f"convergence_{safe_name}.png"))
+        ax = plot_optimization_history(study)
+        ax.set_title(f"{name} — Optuna Convergence")
+        ax.figure.savefig(plots_dir / f"convergence_{safe_name}.png",
+                          dpi=150, bbox_inches="tight")
+        plt.close("all")
 
-        fig = ov.plot_param_importances(study)
-        fig.update_layout(title=f"{name} — Hyperparameter Importance")
-        fig.write_image(str(plots_dir / f"param_importance_{safe_name}.png"))
+        ax = plot_param_importances(study)
+        ax.set_title(f"{name} — Hyperparameter Importance")
+        ax.figure.savefig(plots_dir / f"param_importance_{safe_name}.png",
+                          dpi=150, bbox_inches="tight")
+        plt.close("all")
 
         logger.info("  Plots saved → %s/{convergence,param_importance}_%s.png",
                     plots_dir, safe_name)
-    except ImportError:
-        logger.warning("  kaleido not installed — skipping plots. "
-                       "Install with: pip install kaleido")
     except Exception as exc:
         import traceback
         logger.warning("  Plot export failed (%s): %s\n%s",
