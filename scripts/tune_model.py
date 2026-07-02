@@ -413,7 +413,7 @@ def _get_clf_fit_params(model: str, y_cls: np.ndarray) -> dict | None:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def main(data_path: Path, stage: str, clf_model: str, reg_model: str,
-         n_trials: int, eval_only: bool = False):
+         n_trials: int, eval_only: bool = False, task: str = "both"):
     models_dir  = MODELS_DIR  / stage
     results_dir = RESULTS_DIR / stage
     plots_dir   = results_dir / "plots"
@@ -478,10 +478,11 @@ def main(data_path: Path, stage: str, clf_model: str, reg_model: str,
         logger.info("Loaded best params from %s", params_path)
 
     # ── Classification pipeline: tune clf_model ───────────────────────────────
-    logger.info("\n%s\nClassification Pipeline — tuning %s\n%s",
-                "="*55, _LABELS[clf_model], "="*55)
     clf_key = f"{clf_model}_clf"
-    if not eval_only:
+    if task in ("both", "clf"):
+        logger.info("\n%s\nClassification Pipeline — tuning %s\n%s",
+                    "="*55, _LABELS[clf_model], "="*55)
+    if task in ("both", "clf") and not eval_only:
         val, params, study = _tune(
             f"{clf_model.upper()}-clf", _CLF_OBJ[clf_model], "maximize", n_trials,
             X, y_cls, groups, numeric_features,
@@ -505,10 +506,11 @@ def main(data_path: Path, stage: str, clf_model: str, reg_model: str,
                     _LABELS[clf_model], base, val, 100 * (val - base) / max(base, 1e-9))
 
     # ── Regression pipeline: tune reg_model ───────────────────────────────────
-    logger.info("\n%s\nRegression Pipeline — tuning %s\n%s",
-                "="*55, _LABELS[reg_model], "="*55)
     reg_key = f"{reg_model}_reg"
-    if not eval_only:
+    if task in ("both", "reg"):
+        logger.info("\n%s\nRegression Pipeline — tuning %s\n%s",
+                    "="*55, _LABELS[reg_model], "="*55)
+    if task in ("both", "reg") and not eval_only:
         val, params, study = _tune(
             f"{reg_model.upper()}-reg", _REG_OBJ[reg_model], "minimize", n_trials,
             X, y_reg, groups, numeric_features,
@@ -685,9 +687,11 @@ if __name__ == "__main__":
     parser.add_argument("--trials",    type=int, default=N_TRIALS)
     parser.add_argument("--eval-only", action="store_true",
                         help="Skip Optuna; load best_params.json and run full evaluation only")
+    parser.add_argument("--task", choices=["both", "clf", "reg"], default="both",
+                        help="Which pipeline to tune: both (default), clf only, or reg only")
     args = parser.parse_args()
 
     stage = args.stage or (
         "baseline_tuned" if "fe" not in args.data.stem else "fe_tuned"
     )
-    main(args.data, stage, args.clf_model, args.reg_model, args.trials, args.eval_only)
+    main(args.data, stage, args.clf_model, args.reg_model, args.trials, args.eval_only, args.task)
