@@ -278,11 +278,20 @@ def plot_class_distribution(df: pd.DataFrame, out_dir: Path):
 # ── 7. Correlation heatmap ────────────────────────────────────────────────────
 
 def plot_correlation_heatmap(df: pd.DataFrame, out_dir: Path):
-    numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
-    drop_cols    = ["blast_radius_final"]
+    severity_order = {"Low": 0, "Medium": 1, "High": 2}
+    plot_df = df.copy()
+    plot_df["severity_encoded"] = plot_df["severity"].map(severity_order)
+
+    numeric_cols = plot_df.select_dtypes(include=[np.number]).columns.tolist()
+    drop_cols    = ["final_latency_delta"]   # label-basis column, not a feature
     numeric_cols = [c for c in numeric_cols if c not in drop_cols]
 
-    corr = df[numeric_cols].corr()
+    # Put target labels last so they appear on the right/bottom of the heatmap
+    label_cols   = [c for c in ["severity_encoded", "blast_radius_final"] if c in numeric_cols]
+    feature_cols = [c for c in numeric_cols if c not in label_cols]
+    numeric_cols = feature_cols + label_cols
+
+    corr = plot_df[numeric_cols].corr(method="spearman")
 
     fig, ax = plt.subplots(figsize=(max(10, len(numeric_cols) * 0.7),
                                     max(8,  len(numeric_cols) * 0.7)))
@@ -291,9 +300,10 @@ def plot_correlation_heatmap(df: pd.DataFrame, out_dir: Path):
                 vmin=-1, vmax=1, center=0, linewidths=0.3,
                 ax=ax, cbar_kws={"shrink": 0.7, "label": "Pearson r"},
                 annot_kws={"size": 7})
-    ax.set_title("Feature Correlation Matrix\n"
-                 "(lower triangle only; dark red = strong positive, dark blue = strong negative)",
-                 fontsize=12)
+    ax.set_title("Feature Correlation Matrix (Spearman)\n"
+                 "(lower triangle; severity_encoded: Low=0 Medium=1 High=2; "
+                 "dark red = strong positive, dark blue = strong negative)",
+                 fontsize=11)
     plt.xticks(rotation=45, ha="right", fontsize=8)
     plt.yticks(rotation=0, fontsize=8)
     plt.tight_layout()

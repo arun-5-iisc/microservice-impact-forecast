@@ -37,6 +37,11 @@ LATENCY_DELTA_MEDIUM = 0.20   # >20%  increase → Medium
 ERROR_RATE_HIGH      = 0.05
 ERROR_RATE_MEDIUM    = 0.01
 
+# Services without COLLECTOR_SERVICE_ADDR / OTEL_SERVICE_NAME in their Helm
+# templates — traces are never exported to Jaeger for these services.
+# Evidence: deployment/online-boutique/helm-chart/templates/{service}.yaml
+NO_TRACE_SERVICES = {"adservice", "cartservice", "shippingservice"}
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Prometheus helpers
@@ -365,6 +370,7 @@ def process_experiment(exp_dir: Path) -> list[dict]:
             "severity":              severity,
             "blast_radius_final":    blast_radius_final,
             "final_latency_delta":   final_lat_delta,
+            "latency_observable":    service not in NO_TRACE_SERVICES,
         })
 
     return rows
