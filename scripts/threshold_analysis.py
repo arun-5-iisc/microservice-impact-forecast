@@ -1,34 +1,37 @@
 """
-Threshold analysis script — run on VM where processed dataset exists.
+Threshold analysis and feature EDA — two distinct modes, run in order:
 
-Analyses the distribution of latency delta and error rate across all experiments
-to provide empirical evidence for the severity thresholds defined in preprocess.py:
-  LATENCY_DELTA_HIGH   = 1.0  (>100% increase → High)
-  LATENCY_DELTA_MEDIUM = 0.20 (>20%  increase → Medium)
-  ERROR_RATE_HIGH      = 0.05 (>5%   error rate → High)
-  ERROR_RATE_MEDIUM    = 0.01 (>1%   error rate → Medium)
+  --mode threshold   (BEFORE holdout split, full dataset)
+      Validates the severity label design:
+        class_distribution.png, blast_radius_dist.png, threshold_summary.csv,
+        latency_delta_dist.png, error_rate_dist.png, latency_delta_kde.png,
+        threshold_confusion_table.csv, sensitivity_analysis.csv/.png,
+        coverage_table.csv, dataset_overview.csv, missing_values.csv/.png
+      Output dir: results/threshold_analysis/threshold/
 
-Outputs (saved to results/threshold_analysis/ and uploaded to GCS):
-  dataset_overview.csv        — experiment/feature/class inventory (EDA §1)
-  missing_values.csv/.png     — per-feature missingness (EDA §2)
-  class_distribution.png      — severity class counts and proportions (EDA §3)
-  blast_radius_dist.png       — regression target distribution (EDA §3)
-  threshold_summary.csv       — percentile statistics per severity class (EDA §3)
-  latency_delta_dist.png      — latency delta distribution by severity class (EDA §3)
-  error_rate_dist.png         — error rate distribution by severity class (EDA §3)
-  latency_delta_kde.png       — KDE plot showing threshold positions (EDA §3)
-  time_evolution.png/.csv     — proactive signal build-up across T=15–60s (EDA §4)
-  feature_boxplots.png        — box plots of key features by severity class (EDA §4)
-  correlation_heatmap.png     — Spearman feature correlation heatmap (EDA §5)
-  threshold_confusion_table.csv — actual severity vs latency band (EDA §5)
-  sensitivity_analysis.csv/.png — threshold stability analysis (EDA §5)
-  coverage_table.csv          — fault/service diversity per severity class (EDA §5)
-  feature_justification.csv   — per-feature rationale + Spearman correlations (EDA §6)
+  --mode features    (AFTER holdout split + feature_engineer.py, training set only)
+      Justifies which features to include for classification and regression:
+        correlation_heatmap.png, feature_target_correlations.png (clf vs reg
+        ranked bar charts), feature_boxplots.png, feature_justification.csv,
+        time_evolution.png/.csv, missing_values.csv/.png
+      Run twice — once on base features, once on engineered features:
+        Output dir: results/threshold_analysis/features_base/   (training_dataset.csv)
+        Output dir: results/threshold_analysis/features_fe/     (training_dataset_fe.csv)
 
-Usage (on VM):
-  python scripts/threshold_analysis.py
-  python scripts/threshold_analysis.py --data dataset/processed/training_dataset_fe.csv
-  python scripts/threshold_analysis.py --upload gs://ff-dataset-bucket/processed/
+Pipeline order:
+  preprocess.py
+  threshold_analysis.py --mode threshold                         (full dataset)
+  create_holdout.py
+  threshold_analysis.py --mode features --data training_dataset.csv
+  feature_engineer.py
+  threshold_analysis.py --mode features --data training_dataset_fe.csv
+  train_model.py → tune_model.py → visualize.py
+
+Thresholds defined in preprocess.py:
+  LATENCY_DELTA_HIGH   = 1.0   (>100% increase → High)
+  LATENCY_DELTA_MEDIUM = 0.20  (>20%  increase → Medium)
+  ERROR_RATE_HIGH      = 0.05  (>5%   error rate → High)
+  ERROR_RATE_MEDIUM    = 0.01  (>1%   error rate → Medium)
 """
 import argparse
 import logging
@@ -37,7 +40,6 @@ from pathlib import Path
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-import matplotlib.patches as mpatches
 import numpy as np
 import pandas as pd
 import seaborn as sns
@@ -274,7 +276,7 @@ def plot_class_distribution(df: pd.DataFrame, out_dir: Path):
 
     colors = [SEVERITY_COLORS[s] for s in SEVERITY_ORDER]
     axes[0].bar(SEVERITY_ORDER, counts.values, color=colors, edgecolor="white")
-    for i, (sev, cnt) in enumerate(zip(SEVERITY_ORDER, counts.values)):
+    for i, (_, cnt) in enumerate(zip(SEVERITY_ORDER, counts.values)):
         axes[0].text(i, cnt + 2, str(cnt), ha="center", fontsize=12, fontweight="bold")
     axes[0].set_ylabel("Count")
     axes[0].set_title("Severity Class Distribution — Counts")
@@ -694,21 +696,33 @@ def feature_justification_table(df: pd.DataFrame, out_dir: Path):
     plot_df["severity_encoded"] = plot_df["severity"].map({"Low": 0, "Medium": 1, "High": 2})
 
     FEATURE_META = {
-        "target_latency_delta":   ("trace",      "Relative latency change — primary degradation signal"),
-        "target_error_rate":      ("trace",      "Error span fraction — direct user-visible impact"),
-        "target_request_rate":    ("trace",      "Request throughput; drops signal cascading failure"),
-        "target_cpu":             ("prometheus", "Pod CPU; spikes precede OOMKill and latency faults"),
-        "target_cpu_delta":       ("prometheus", "Normalised CPU change from baseline"),
-        "target_memory_bytes":    ("prometheus", "Pod memory; pressure leads to OOM restarts"),
-        "target_memory_delta":    ("prometheus", "Normalised memory change from baseline"),
-        "target_replicas":        ("prometheus", "0 = service unavailable → guaranteed High"),
-        "target_restart_count":   ("prometheus", "Container restarts under fault → guaranteed High"),
-        "system_cpu_mean":        ("prometheus", "Cluster-wide CPU; captures coordinated degradation"),
-        "system_memory_mean":     ("prometheus", "Cluster-wide memory; baseline load context"),
-        "blast_radius_early":     ("trace",      "Upstream propagation count; quantifies cascade scope"),
-        "max_trace_depth":        ("trace",      "Trace depth; long chains amplify tail latency"),
-        "time_into_fault_s":      ("context",    "Observation window — enables proactive formulation"),
-        "fault_value_numeric":    ("context",    "Fault magnitude; distinguishes mild vs severe injection"),
+        # Base features
+        "target_latency_delta":     ("trace",      "Relative latency change — primary degradation signal"),
+        "target_error_rate":        ("trace",      "Error span fraction — direct user-visible impact"),
+        "target_request_rate":      ("trace",      "Request throughput; drops signal cascading failure"),
+        "target_cpu":               ("prometheus", "Pod CPU; spikes precede OOMKill and latency faults"),
+        "target_cpu_delta":         ("prometheus", "Normalised CPU change from baseline"),
+        "target_memory_bytes":      ("prometheus", "Pod memory; pressure leads to OOM restarts"),
+        "target_memory_delta":      ("prometheus", "Normalised memory change from baseline"),
+        "target_replicas":          ("prometheus", "0 = service unavailable → guaranteed High"),
+        "target_restart_count":     ("prometheus", "Container restarts under fault → guaranteed High"),
+        "system_cpu_mean":          ("prometheus", "Cluster-wide CPU; captures coordinated degradation"),
+        "system_memory_mean":       ("prometheus", "Cluster-wide memory; baseline load context"),
+        "blast_radius_early":       ("trace",      "Upstream propagation count; quantifies cascade scope"),
+        "max_trace_depth":          ("trace",      "Trace depth; long chains amplify tail latency"),
+        "time_into_fault_s":        ("context",    "Observation window — enables proactive formulation"),
+        "fault_value_numeric":      ("context",    "Fault magnitude; distinguishes mild vs severe injection"),
+        # Engineered features
+        "fault_severity_ratio":     ("fe",         "Normalised fault magnitude vs service resource limit"),
+        "topology_fan_out":         ("fe_topo",    "Downstream dependency count — cascade amplifier"),
+        "topology_fan_in":          ("fe_topo",    "Upstream dependency count — blast radius scope"),
+        "topology_depth":           ("fe_topo",    "Call-graph depth — latency amplification along chain"),
+        "log_target_latency_delta": ("fe_log",     "Log-scaled latency delta — stabilises heavy tail"),
+        "log_target_cpu":           ("fe_log",     "Log-scaled CPU — reduces skew in tree splits"),
+        "log_blast_radius_early":   ("fe_log",     "Log-scaled early blast radius"),
+        "sys_trace_error_rate":     ("fe_sys",     "System-wide error rate across all services"),
+        "sys_trace_latency_mean":   ("fe_sys",     "System-wide latency mean — baseline health context"),
+        "sys_trace_request_rate":   ("fe_sys",     "System-wide request rate — traffic context"),
     }
 
     rows = []
@@ -740,104 +754,230 @@ def feature_justification_table(df: pd.DataFrame, out_dir: Path):
     return result
 
 
+# ── Feature–target correlation bar charts (clf vs reg) ───────────────────────
+
+def plot_feature_target_correlations(df: pd.DataFrame, out_dir: Path):
+    """
+    Two ranked bar charts showing Spearman |correlation| of every numeric feature
+    against each target:
+      Left  — ranked by |corr vs severity_encoded|  → guides classifier feature selection
+      Right — ranked by |corr vs blast_radius_final| → guides regressor feature selection
+
+    Allows direct comparison of which features matter most for each task.
+    """
+    plot_df = df.copy()
+    plot_df["severity_encoded"] = plot_df["severity"].map({"Low": 0, "Medium": 1, "High": 2})
+
+    exclude = {"severity_encoded", "blast_radius_final", "final_latency_delta",
+               "experiment_id", "time_into_fault_s", "latency_observable"}
+    feature_cols = [
+        c for c in plot_df.select_dtypes(include=[np.number]).columns
+        if c not in exclude
+    ]
+
+    records = []
+    for feat in feature_cols:
+        aligned = plot_df[[feat, "severity_encoded", "blast_radius_final"]].dropna()
+        if len(aligned) < 10:
+            continue
+        clf_corr = aligned[[feat, "severity_encoded"]].corr(method="spearman").iloc[0, 1]
+        reg_corr = aligned[[feat, "blast_radius_final"]].corr(method="spearman").iloc[0, 1]
+        records.append({"feature": feat,
+                        "clf_spearman": round(clf_corr, 3),
+                        "reg_spearman": round(reg_corr, 3)})
+
+    if not records:
+        logger.warning("plot_feature_target_correlations: no numeric features found")
+        return
+
+    corr_df = pd.DataFrame(records)
+    corr_df.to_csv(out_dir / "feature_target_correlations.csv", index=False)
+
+    fig, axes = plt.subplots(1, 2, figsize=(16, max(6, len(records) * 0.35 + 1.5)))
+
+    for ax, col, title, color in [
+        (axes[0], "clf_spearman",
+         "Classification — |Spearman vs severity|\n(higher = more useful for clf)",
+         "#4C72B0"),
+        (axes[1], "reg_spearman",
+         "Regression — |Spearman vs blast_radius_final|\n(higher = more useful for reg)",
+         "#DD8452"),
+    ]:
+        ranked = corr_df.reindex(
+            corr_df[col].abs().sort_values(ascending=True).index
+        )
+        bars = ax.barh(ranked["feature"], ranked[col].abs(),
+                       color=color, alpha=0.8, edgecolor="white")
+        # Colour bars negative correlations slightly differently
+        for bar, val in zip(bars, ranked[col]):
+            if val < 0:
+                bar.set_alpha(0.5)
+                bar.set_hatch("//")
+        ax.set_xlabel("|Spearman correlation|")
+        ax.set_title(title, fontsize=11)
+        ax.set_xlim(0, 1)
+        ax.axvline(0.3, color="grey", linestyle=":", linewidth=1, label="weak (0.3)")
+        ax.axvline(0.5, color="grey", linestyle="--", linewidth=1, label="moderate (0.5)")
+        ax.legend(fontsize=8)
+
+    fig.suptitle("Feature–Target Correlations: Classification vs Regression",
+                 fontsize=13, y=1.01)
+    plt.tight_layout()
+    path = out_dir / "feature_target_correlations.png"
+    fig.savefig(path, bbox_inches="tight")
+    plt.close(fig)
+    logger.info("Saved → %s", path)
+
+
 # ── Main ───────────────────────────────────────────────────────────────────────
 
-def main(data_path: Path, out_dir: Path, upload_prefix: str | None):
+def main(data_path: Path, out_dir: Path, upload_prefix: str | None, mode: str):
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    logger.info("Loading dataset from %s", data_path)
+    logger.info("Loading dataset from %s  [mode=%s]", data_path, mode)
     df = pd.read_csv(data_path)
+
+    if mode == "threshold":
+        # Use full dataset — threshold validation is about the labeling methodology,
+        # decided before any train/test split existed.
+        logger.info(
+            "Threshold mode: using full dataset (%d experiments)",
+            df["experiment_id"].nunique(),
+        )
+    else:
+        # Feature EDA informs model decisions → must exclude holdout.
+        holdout_path = REPO_ROOT / "dataset" / "processed" / "holdout_ids.txt"
+        if holdout_path.exists():
+            holdout_ids = set(holdout_path.read_text().strip().splitlines())
+            before = df["experiment_id"].nunique()
+            df = df[~df["experiment_id"].isin(holdout_ids)].reset_index(drop=True)
+            logger.info(
+                "Holdout excluded: %d → %d training experiments (%d withheld)",
+                before, df["experiment_id"].nunique(),
+                before - df["experiment_id"].nunique(),
+            )
+        else:
+            logger.warning(
+                "holdout_ids.txt not found — feature EDA includes ALL experiments. "
+                "Run create_holdout.py first."
+            )
+
     logger.info("Dataset: %d rows, %d columns, %d experiments",
                 len(df), len(df.columns), df["experiment_id"].nunique())
-
-    logger.info("\nSeverity distribution:\n%s",
+    logger.info("Severity distribution:\n%s",
                 df["severity"].value_counts().reindex(SEVERITY_ORDER).to_string())
 
-    # ── Threshold summary (EDA §3 — percentile stats per class) ──────────────
-    logger.info("Computing threshold summary…")
-    summary = threshold_summary(df)
-    summary.to_csv(out_dir / "threshold_summary.csv", index=False)
-    logger.info("\nThreshold summary:\n%s", summary.to_string(index=False))
+    if mode == "threshold":
+        # ── Threshold validation (full dataset, before split) ─────────────────
+        logger.info("Computing threshold summary…")
+        summary = threshold_summary(df)
+        summary.to_csv(out_dir / "threshold_summary.csv", index=False)
+        logger.info("\nThreshold summary:\n%s", summary.to_string(index=False))
 
-    # ── EDA §1: Dataset overview ──────────────────────────────────────────────
-    logger.info("EDA §1 — dataset overview…")
-    dataset_overview(df, out_dir)
+        logger.info("Dataset overview…")
+        dataset_overview(df, out_dir)
 
-    # ── EDA §2: Missing values ────────────────────────────────────────────────
-    logger.info("EDA §2 — missing value analysis…")
-    missing_value_analysis(df, out_dir)
+        logger.info("Missing value analysis…")
+        missing_value_analysis(df, out_dir)
 
-    # ── EDA §3: Target distributions ─────────────────────────────────────────
-    logger.info("EDA §3 — target distributions…")
-    plot_class_distribution(df, out_dir)
-    plot_blast_radius_dist(df, out_dir)
-    plot_latency_delta_dist(df, out_dir)
-    plot_error_rate_dist(df, out_dir)
+        logger.info("Target distributions…")
+        plot_class_distribution(df, out_dir)
+        plot_blast_radius_dist(df, out_dir)
+        plot_latency_delta_dist(df, out_dir)
+        plot_error_rate_dist(df, out_dir)
+        plot_latency_kde(df, out_dir)
 
-    # ── EDA §4: Feature behaviour ─────────────────────────────────────────────
-    logger.info("EDA §4 — feature behaviour…")
-    plot_time_evolution(df, out_dir)
-    plot_latency_kde(df, out_dir)
-    plot_feature_boxplots(df, out_dir)
+        logger.info("Threshold validation…")
+        threshold_confusion_table(df, out_dir)
+        coverage_table(df, out_dir)
+        sensitivity_analysis(df, out_dir)
 
-    # ── EDA §5: Feature relationships ─────────────────────────────────────────
-    logger.info("EDA §5 — feature relationships…")
-    plot_correlation_heatmap(df, out_dir)
-    threshold_confusion_table(df, out_dir)
-    coverage_table(df, out_dir)
-    sensitivity_analysis(df, out_dir)
+        logger.info("\n%s\nKEY THRESHOLD FINDINGS\n%s", "="*55, "="*55)
+        for col, med_t, high_t in [
+            ("target_latency_delta", LATENCY_DELTA_MEDIUM, LATENCY_DELTA_HIGH),
+            ("target_error_rate",    ERROR_RATE_MEDIUM,    ERROR_RATE_HIGH),
+        ]:
+            if col not in df.columns:
+                continue
+            logger.info("\n%s", col)
+            for sev in SEVERITY_ORDER:
+                vals = df[df["severity"] == sev][col].dropna()
+                logger.info(
+                    "  %s: mean=%.3f  median=%.3f  p90=%.3f  "
+                    "pct_above_medium=%.1f%%  pct_above_high=%.1f%%",
+                    sev, vals.mean(), vals.median(), vals.quantile(0.90),
+                    100*(vals > med_t).mean(), 100*(vals > high_t).mean()
+                )
 
-    # ── EDA §6: Feature justification ─────────────────────────────────────────
-    logger.info("EDA §6 — feature justification…")
-    feature_justification_table(df, out_dir)
+    else:
+        # ── Feature EDA (training set only, run before base features and after FE) ──
+        is_fe = any(c in df.columns for c in
+                    ["fault_severity_ratio", "topology_fan_out", "sys_trace_error_rate"])
+        label = "FE features" if is_fe else "base features"
+        logger.info("Feature EDA on %s", label)
 
-    # ── Print key findings ────────────────────────────────────────────────────
-    logger.info("\n%s\nKEY THRESHOLD FINDINGS\n%s", "="*55, "="*55)
-    for col, med_t, high_t in [
-        ("target_latency_delta", LATENCY_DELTA_MEDIUM, LATENCY_DELTA_HIGH),
-        ("target_error_rate",    ERROR_RATE_MEDIUM,    ERROR_RATE_HIGH),
-    ]:
-        if col not in df.columns:
-            continue
-        logger.info("\n%s", col)
-        for sev in SEVERITY_ORDER:
-            vals = df[df["severity"] == sev][col].dropna()
-            logger.info(
-                "  %s: mean=%.3f  median=%.3f  p90=%.3f  "
-                "pct_above_medium=%.1f%%  pct_above_high=%.1f%%",
-                sev, vals.mean(), vals.median(), vals.quantile(0.90),
-                100*(vals > med_t).mean(), 100*(vals > high_t).mean()
-            )
+        logger.info("Missing value analysis…")
+        missing_value_analysis(df, out_dir)
+
+        logger.info("Time evolution (proactive signal build-up)…")
+        plot_time_evolution(df, out_dir)
+
+        logger.info("Feature boxplots by severity class (classification)…")
+        plot_feature_boxplots(df, out_dir)
+
+        logger.info("Correlation heatmap…")
+        plot_correlation_heatmap(df, out_dir)
+
+        logger.info("Feature–target correlations: clf vs reg…")
+        plot_feature_target_correlations(df, out_dir)
+
+        logger.info("Feature justification table…")
+        feature_justification_table(df, out_dir)
 
     # ── Upload to GCS ─────────────────────────────────────────────────────────
     if upload_prefix:
         import subprocess
-        logger.info("Uploading results to %s", upload_prefix)
-        subprocess.run([
-            "gcloud", "storage", "cp", "-r",
-            str(out_dir) + "/",
-            upload_prefix.rstrip("/") + "/threshold_analysis/",
-        ], check=True)
-        for csv_name in ["training_dataset.csv", "training_dataset_fe.csv"]:
-            csv_path = data_path.parent / csv_name
-            if csv_path.exists():
-                subprocess.run([
-                    "gcloud", "storage", "cp",
-                    str(csv_path),
-                    upload_prefix.rstrip("/") + "/" + csv_name,
-                ], check=True)
-                logger.info("Uploaded %s → %s", csv_name, upload_prefix)
+        remote = upload_prefix.rstrip("/") + f"/threshold_analysis/{mode}/"
+        logger.info("Uploading %s → %s", out_dir, remote)
+        subprocess.run(
+            ["gcloud", "storage", "cp", "-r", str(out_dir) + "/", remote],
+            check=True,
+        )
 
-    logger.info("\nAll outputs saved to %s/", out_dir)
+    logger.info("\nAll outputs → %s/", out_dir)
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Threshold analysis and EDA")
-    parser.add_argument("--data",   type=Path, default=DEFAULT_DATA)
-    parser.add_argument("--out",    type=Path, default=DEFAULT_OUT,
-                        help="Output directory for plots and CSVs")
-    parser.add_argument("--upload", type=str, default=None,
-                        help="GCS prefix to upload results and processed CSVs "
-                             "(e.g. gs://ff-dataset-bucket/processed)")
+    parser = argparse.ArgumentParser(
+        description=(
+            "Threshold analysis and feature EDA.\n\n"
+            "Run order:\n"
+            "  1. --mode threshold  (before create_holdout.py, full dataset)\n"
+            "  2. --mode features --data training_dataset.csv     (after holdout split)\n"
+            "  3. --mode features --data training_dataset_fe.csv  (after feature_engineer.py)"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    parser.add_argument("--mode",   choices=["threshold", "features"], required=True,
+                        help="'threshold' = label validation on full data; "
+                             "'features' = feature EDA on training set only")
+    parser.add_argument("--data",   type=Path, default=DEFAULT_DATA,
+                        help="Input dataset CSV (default: training_dataset.csv)")
+    parser.add_argument("--out",    type=Path, default=None,
+                        help="Output directory (auto-derived from --mode and --data if omitted)")
+    parser.add_argument("--upload", type=str,  default=None,
+                        help="GCS prefix to upload outputs (e.g. gs://bucket/processed)")
     args = parser.parse_args()
-    main(args.data, args.out, args.upload)
+
+    if args.out is None:
+        if args.mode == "threshold":
+            out_dir = REPO_ROOT / "results" / "threshold_analysis" / "threshold"
+        else:
+            is_fe = "fe" in args.data.stem
+            out_dir = REPO_ROOT / "results" / "threshold_analysis" / (
+                "features_fe" if is_fe else "features_base"
+            )
+    else:
+        out_dir = args.out
+
+    main(args.data, out_dir, args.upload, args.mode)
