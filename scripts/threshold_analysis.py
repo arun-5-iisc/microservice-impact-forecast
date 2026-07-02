@@ -712,17 +712,14 @@ def feature_justification_table(df: pd.DataFrame, out_dir: Path):
         "max_trace_depth":          ("trace",      "Trace depth; long chains amplify tail latency"),
         "time_into_fault_s":        ("context",    "Observation window — enables proactive formulation"),
         "fault_value_numeric":      ("context",    "Fault magnitude; distinguishes mild vs severe injection"),
-        # Engineered features
+        # Engineered features (names match feature_engineer.py output columns exactly)
         "fault_severity_ratio":     ("fe",         "Normalised fault magnitude vs service resource limit"),
-        "topology_fan_out":         ("fe_topo",    "Downstream dependency count — cascade amplifier"),
-        "topology_fan_in":          ("fe_topo",    "Upstream dependency count — blast radius scope"),
-        "topology_depth":           ("fe_topo",    "Call-graph depth — latency amplification along chain"),
-        "log_target_latency_delta": ("fe_log",     "Log-scaled latency delta — stabilises heavy tail"),
-        "log_target_cpu":           ("fe_log",     "Log-scaled CPU — reduces skew in tree splits"),
-        "log_blast_radius_early":   ("fe_log",     "Log-scaled early blast radius"),
-        "sys_trace_error_rate":     ("fe_sys",     "System-wide error rate across all services"),
-        "sys_trace_latency_mean":   ("fe_sys",     "System-wide latency mean — baseline health context"),
-        "sys_trace_request_rate":   ("fe_sys",     "System-wide request rate — traffic context"),
+        "service_depth":            ("fe_topo",    "Call-graph depth — latency amplification along chain"),
+        "service_downstream_count": ("fe_topo",    "Fan-out: services this service calls — cascade amplifier"),
+        "service_upstream_count":   ("fe_topo",    "Fan-in: services that call this service — criticality"),
+        "service_is_gateway":       ("fe_topo",    "1 if service is the user-facing entry point"),
+        "system_error_rate":        ("fe_sys",     "System-wide error rate across all services"),
+        "system_latency_ratio":     ("fe_sys",     "System-wide latency ratio vs baseline — cluster health"),
     }
 
     rows = []

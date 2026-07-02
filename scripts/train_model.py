@@ -94,6 +94,7 @@ BASE_NUMERIC_FEATURES = [
 FE_NUMERIC_FEATURES = [
     "service_depth",
     "service_downstream_count",
+    "service_upstream_count",
     "service_is_gateway",
     "fault_severity_ratio",
     "system_error_rate",
@@ -233,7 +234,7 @@ def _evaluate_classifier(name, estimator, X, y_encoded, groups, le, numeric_feat
     oof_preds = {}
     oof_true  = {}
 
-    for fold, (train_idx, test_idx) in enumerate(gkf.split(X, y_encoded, groups)):
+    for _, (train_idx, test_idx) in enumerate(gkf.split(X, y_encoded, groups)):
         X_tr, X_te = X.iloc[train_idx], X.iloc[test_idx]
         y_tr, y_te = y_encoded[train_idx], y_encoded[test_idx]
 
@@ -287,7 +288,7 @@ def _evaluate_regressor(name, estimator, X, y, groups, numeric_features):
     fold_mae, fold_rmse = [], []
     all_preds, all_true = [], []
 
-    for fold, (train_idx, test_idx) in enumerate(gkf.split(X, y, groups)):
+    for _, (train_idx, test_idx) in enumerate(gkf.split(X, y, groups)):
         X_tr, X_te = X.iloc[train_idx], X.iloc[test_idx]
         y_tr, y_te = y[train_idx], y[test_idx]
 

@@ -49,20 +49,29 @@ RAW_DIR      = REPO_ROOT / "dataset" / "raw"
 # Static domain knowledge
 # ─────────────────────────────────────────────────────────────────────────────
 
-# Online Boutique call graph (static, from architecture docs)
-# depth=1: entry points called directly by user traffic
-# downstream_count: number of distinct services this service calls
+# Online Boutique call graph — verified from Jaeger traces across 4 experiments
+# downstream_count (fan-out): internal services this service calls
+# upstream_count   (fan-in):  internal services that call this service
+#
+# Confirmed edges:
+#   frontend          → adservice, cartservice, checkoutservice, currencyservice,
+#                        productcatalogservice, recommendationservice, shippingservice (7)
+#   checkoutservice   → cartservice, emailservice, paymentservice,
+#                        productcatalogservice, shippingservice (5)
+#   recommendationservice → (none visible in any trace — calls nothing internally)
+#   cartservice           → (none — calls Redis which is external/untraced)
 SERVICE_TOPOLOGY = {
-    "frontend":              {"depth": 1, "downstream_count": 6, "is_gateway": 1},
-    "checkoutservice":       {"depth": 2, "downstream_count": 5, "is_gateway": 0},
-    "recommendationservice": {"depth": 2, "downstream_count": 1, "is_gateway": 0},
-    "productcatalogservice": {"depth": 2, "downstream_count": 0, "is_gateway": 0},
-    "cartservice":           {"depth": 2, "downstream_count": 1, "is_gateway": 0},
-    "paymentservice":        {"depth": 3, "downstream_count": 0, "is_gateway": 0},
-    "emailservice":          {"depth": 3, "downstream_count": 0, "is_gateway": 0},
-    "shippingservice":       {"depth": 3, "downstream_count": 0, "is_gateway": 0},
-    "currencyservice":       {"depth": 3, "downstream_count": 0, "is_gateway": 0},
-    "adservice":             {"depth": 1, "downstream_count": 0, "is_gateway": 0},
+    #                              depth  fan_out  fan_in  gateway
+    "frontend":              {"depth": 1, "downstream_count": 7, "upstream_count": 0, "is_gateway": 1},
+    "checkoutservice":       {"depth": 2, "downstream_count": 5, "upstream_count": 1, "is_gateway": 0},
+    "recommendationservice": {"depth": 2, "downstream_count": 0, "upstream_count": 1, "is_gateway": 0},
+    "productcatalogservice": {"depth": 2, "downstream_count": 0, "upstream_count": 2, "is_gateway": 0},
+    "cartservice":           {"depth": 2, "downstream_count": 0, "upstream_count": 2, "is_gateway": 0},
+    "paymentservice":        {"depth": 3, "downstream_count": 0, "upstream_count": 1, "is_gateway": 0},
+    "emailservice":          {"depth": 3, "downstream_count": 0, "upstream_count": 1, "is_gateway": 0},
+    "shippingservice":       {"depth": 3, "downstream_count": 0, "upstream_count": 2, "is_gateway": 0},
+    "currencyservice":       {"depth": 3, "downstream_count": 0, "upstream_count": 1, "is_gateway": 0},
+    "adservice":             {"depth": 1, "downstream_count": 0, "upstream_count": 1, "is_gateway": 0},
 }
 
 # Original Helm resource limits per service
@@ -89,6 +98,7 @@ def add_topology_features(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
     df["service_depth"]            = df["service"].map(lambda s: SERVICE_TOPOLOGY.get(s, {}).get("depth"))
     df["service_downstream_count"] = df["service"].map(lambda s: SERVICE_TOPOLOGY.get(s, {}).get("downstream_count"))
+    df["service_upstream_count"]   = df["service"].map(lambda s: SERVICE_TOPOLOGY.get(s, {}).get("upstream_count"))
     df["service_is_gateway"]       = df["service"].map(lambda s: SERVICE_TOPOLOGY.get(s, {}).get("is_gateway"))
     unknown = df["service_depth"].isna().sum()
     if unknown:
@@ -353,7 +363,7 @@ def main(in_path: Path, out_path: Path):
     df.to_csv(out_path, index=False)
 
     new_cols = [
-        "service_depth", "service_downstream_count", "service_is_gateway",
+        "service_depth", "service_downstream_count", "service_upstream_count", "service_is_gateway",
         "fault_severity_ratio",
         "log_target_latency_mean_ms", "log_target_memory_bytes", "log_fault_value_numeric",
         "signed_log_latency_delta",
