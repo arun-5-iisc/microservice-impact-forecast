@@ -38,6 +38,7 @@ import matplotlib
 matplotlib.use("Agg")   # headless — no display required
 import matplotlib.pyplot as plt
 from sklearn.inspection import permutation_importance
+from sklearn.metrics import f1_score, make_scorer
 from sklearn.model_selection import GroupKFold
 from sklearn.preprocessing import LabelEncoder
 
@@ -137,12 +138,20 @@ def _permutation_importance_plot(pipe, X: pd.DataFrame, y: np.ndarray,
     gkf = GroupKFold(n_splits=5)
     all_imp = []
 
+    # XGBClassifier.predict() returns float32 class indices; cast to int so
+    # sklearn's f1_macro scorer does not misidentify them as continuous targets.
+    _scorer = make_scorer(
+        lambda y_true, y_pred: f1_score(
+            y_true, y_pred.astype(int), average="macro", zero_division=0
+        )
+    )
+
     for train_idx, test_idx in gkf.split(X, y, groups):
         pipe.fit(X.iloc[train_idx], y[train_idx])
         result = permutation_importance(
             pipe, X.iloc[test_idx], y[test_idx],
             n_repeats=n_repeats,
-            scoring="f1_macro",
+            scoring=_scorer,
             random_state=42,
             n_jobs=-1,
         )
