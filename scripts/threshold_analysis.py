@@ -49,9 +49,9 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-REPO_ROOT   = Path(__file__).parent.parent
+REPO_ROOT    = Path(__file__).parent.parent
 DEFAULT_DATA = REPO_ROOT / "dataset" / "processed" / "training_dataset.csv"
-OUT_DIR      = REPO_ROOT / "results" / "threshold_analysis"
+DEFAULT_OUT  = REPO_ROOT / "results" / "threshold_analysis"
 
 SEVERITY_ORDER  = ["Low", "Medium", "High"]
 SEVERITY_COLORS = {"Low": "#55A868", "Medium": "#DD8452", "High": "#C43235"}
@@ -621,8 +621,8 @@ def plot_time_evolution(df: pd.DataFrame, out_dir: Path):
     for ax, feat, ylabel, title in [
         (axes[0], "target_latency_delta", "Median Latency Delta (fraction of baseline)",
          "Latency Signal Separation Across Observation Windows"),
-        (axes[1], "target_error_rate",    "Median Error Rate",
-         "Error Rate Separation Across Observation Windows"),
+        (axes[1], "target_restart_count", "Median Restart Count",
+         "Restart Signal Separation Across Observation Windows"),
     ]:
         if feat not in df.columns:
             continue
@@ -652,8 +652,8 @@ def plot_time_evolution(df: pd.DataFrame, out_dir: Path):
         ax.legend(title="Severity")
 
     fig.suptitle(
-        "Proactive Signal Build-Up: Feature Separation Across Observation Windows\n"
-        "(separation at T=15s confirms early detectability; shaded band = IQR)",
+        "Evolution of median observability signals during the first 60 s of fault injection\n"
+        "(shaded region = IQR)",
         fontsize=12, y=1.02,
     )
     plt.tight_layout()
@@ -742,8 +742,8 @@ def feature_justification_table(df: pd.DataFrame, out_dir: Path):
 
 # ── Main ───────────────────────────────────────────────────────────────────────
 
-def main(data_path: Path, upload_prefix: str | None):
-    OUT_DIR.mkdir(parents=True, exist_ok=True)
+def main(data_path: Path, out_dir: Path, upload_prefix: str | None):
+    out_dir.mkdir(parents=True, exist_ok=True)
 
     logger.info("Loading dataset from %s", data_path)
     df = pd.read_csv(data_path)
@@ -756,40 +756,40 @@ def main(data_path: Path, upload_prefix: str | None):
     # ── Threshold summary (EDA §3 — percentile stats per class) ──────────────
     logger.info("Computing threshold summary…")
     summary = threshold_summary(df)
-    summary.to_csv(OUT_DIR / "threshold_summary.csv", index=False)
+    summary.to_csv(out_dir / "threshold_summary.csv", index=False)
     logger.info("\nThreshold summary:\n%s", summary.to_string(index=False))
 
     # ── EDA §1: Dataset overview ──────────────────────────────────────────────
     logger.info("EDA §1 — dataset overview…")
-    dataset_overview(df, OUT_DIR)
+    dataset_overview(df, out_dir)
 
     # ── EDA §2: Missing values ────────────────────────────────────────────────
     logger.info("EDA §2 — missing value analysis…")
-    missing_value_analysis(df, OUT_DIR)
+    missing_value_analysis(df, out_dir)
 
     # ── EDA §3: Target distributions ─────────────────────────────────────────
     logger.info("EDA §3 — target distributions…")
-    plot_class_distribution(df, OUT_DIR)
-    plot_blast_radius_dist(df, OUT_DIR)
-    plot_latency_delta_dist(df, OUT_DIR)
-    plot_error_rate_dist(df, OUT_DIR)
+    plot_class_distribution(df, out_dir)
+    plot_blast_radius_dist(df, out_dir)
+    plot_latency_delta_dist(df, out_dir)
+    plot_error_rate_dist(df, out_dir)
 
     # ── EDA §4: Feature behaviour ─────────────────────────────────────────────
     logger.info("EDA §4 — feature behaviour…")
-    plot_time_evolution(df, OUT_DIR)
-    plot_latency_kde(df, OUT_DIR)
-    plot_feature_boxplots(df, OUT_DIR)
+    plot_time_evolution(df, out_dir)
+    plot_latency_kde(df, out_dir)
+    plot_feature_boxplots(df, out_dir)
 
     # ── EDA §5: Feature relationships ─────────────────────────────────────────
     logger.info("EDA §5 — feature relationships…")
-    plot_correlation_heatmap(df, OUT_DIR)
-    threshold_confusion_table(df, OUT_DIR)
-    coverage_table(df, OUT_DIR)
-    sensitivity_analysis(df, OUT_DIR)
+    plot_correlation_heatmap(df, out_dir)
+    threshold_confusion_table(df, out_dir)
+    coverage_table(df, out_dir)
+    sensitivity_analysis(df, out_dir)
 
     # ── EDA §6: Feature justification ─────────────────────────────────────────
     logger.info("EDA §6 — feature justification…")
-    feature_justification_table(df, OUT_DIR)
+    feature_justification_table(df, out_dir)
 
     # ── Print key findings ────────────────────────────────────────────────────
     logger.info("\n%s\nKEY THRESHOLD FINDINGS\n%s", "="*55, "="*55)
@@ -815,10 +815,9 @@ def main(data_path: Path, upload_prefix: str | None):
         logger.info("Uploading results to %s", upload_prefix)
         subprocess.run([
             "gcloud", "storage", "cp", "-r",
-            str(OUT_DIR) + "/",
+            str(out_dir) + "/",
             upload_prefix.rstrip("/") + "/threshold_analysis/",
         ], check=True)
-        # Also upload processed CSVs
         for csv_name in ["training_dataset.csv", "training_dataset_fe.csv"]:
             csv_path = data_path.parent / csv_name
             if csv_path.exists():
@@ -829,14 +828,16 @@ def main(data_path: Path, upload_prefix: str | None):
                 ], check=True)
                 logger.info("Uploaded %s → %s", csv_name, upload_prefix)
 
-    logger.info("\nAll outputs saved to %s/", OUT_DIR)
+    logger.info("\nAll outputs saved to %s/", out_dir)
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Threshold analysis and EDA")
     parser.add_argument("--data",   type=Path, default=DEFAULT_DATA)
+    parser.add_argument("--out",    type=Path, default=DEFAULT_OUT,
+                        help="Output directory for plots and CSVs")
     parser.add_argument("--upload", type=str, default=None,
                         help="GCS prefix to upload results and processed CSVs "
                              "(e.g. gs://ff-dataset-bucket/processed)")
     args = parser.parse_args()
-    main(args.data, args.upload)
+    main(args.data, args.out, args.upload)

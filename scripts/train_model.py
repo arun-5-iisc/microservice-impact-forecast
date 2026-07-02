@@ -98,11 +98,16 @@ FE_NUMERIC_FEATURES = [
     "log_target_latency_mean_ms",
     "log_target_memory_bytes",
     "log_fault_value_numeric",
+    "signed_log_latency_delta",
     "system_error_rate",
     "system_latency_ratio",
 ]
 
 SEVERITY_ORDER = ["Low", "Medium", "High"]
+
+# Thresholds from preprocess.py — used by the rule-based baseline
+LATENCY_DELTA_HIGH   = 1.0
+LATENCY_DELTA_MEDIUM = 0.20
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -175,6 +180,44 @@ def _get_importances(pipe, numeric_features: list[str]):
     if len(imp) != len(feat_names):
         feat_names = [f"f{i}" for i in range(len(imp))]
     return pd.Series(imp, index=feat_names).sort_values(ascending=False)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Rule-based baseline (no ML)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _evaluate_rule_baseline(df: pd.DataFrame) -> dict:
+    """
+    Non-ML baseline: predict severity using only the early target_latency_delta
+    threshold rule — the same boundaries used to create labels from the FINAL
+    window, now applied to the EARLY observation window.
+
+    NaN latency (uninstrumented services) → predict Low, since the rule has no
+    other signal.  This conservative fallback intentionally reveals the rule's
+    blind spot: High experiments caused by restarts or replica loss on
+    uninstrumented services will be misclassified as Low.
+
+    No cross-validation needed — the rule has no learnable parameters.
+    """
+    def _rule(v):
+        if pd.isna(v) or v <= LATENCY_DELTA_MEDIUM:
+            return "Low"
+        if v <= LATENCY_DELTA_HIGH:
+            return "Medium"
+        return "High"
+
+    y_pred = df["target_latency_delta"].map(_rule).values
+    y_true = df["severity"].values
+
+    report = classification_report(
+        y_true, y_pred,
+        labels=SEVERITY_ORDER,
+        target_names=SEVERITY_ORDER,
+        output_dict=True,
+        zero_division=0,
+    )
+    report["accuracy"] = accuracy_score(y_true, y_pred)
+    return report
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -307,6 +350,25 @@ def main(data_path: Path):
     feat_imp_cls = {}
     best_oof_preds = None   # OOF predictions from LightGBM (best macro-F1) for time analysis
     best_oof_true  = None
+
+    # ── Rule-based baseline (no ML) ───────────────────────────────────────────
+    logger.info("Evaluating rule-based baseline (latency thresholds only)…")
+    rule_report = _evaluate_rule_baseline(df)
+    rule_row = {"model": "RuleBaseline"}
+    for cls in SEVERITY_ORDER:
+        rule_row[f"{cls}_f1"] = round(rule_report[cls]["f1-score"], 4)
+    rule_row["macro_f1"] = round(rule_report["macro avg"]["f1-score"], 4)
+    rule_row["accuracy"] = round(rule_report["accuracy"], 4)
+    clf_rows.append(rule_row)
+    logger.info(
+        "  RuleBaseline → accuracy=%.3f  macro-F1=%.3f  "
+        "[Low=%.3f  Med=%.3f  High=%.3f]",
+        rule_report["accuracy"],
+        rule_report["macro avg"]["f1-score"],
+        rule_report["Low"]["f1-score"],
+        rule_report["Medium"]["f1-score"],
+        rule_report["High"]["f1-score"],
+    )
 
     for name, estimator in _classifiers().items():
         logger.info("Training %s classifier...", name)

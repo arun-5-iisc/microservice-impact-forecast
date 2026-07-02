@@ -153,6 +153,12 @@ def add_log_transforms(df: pd.DataFrame) -> pd.DataFrame:
     df["log_fault_value_numeric"] = df["fault_value_numeric"].apply(
         lambda x: np.log1p(x) if pd.notna(x) else np.nan
     )
+    # Signed log of latency delta — compresses extreme High outliers (mean=93, median=28)
+    # while preserving sign (negative delta = latency improved vs baseline).
+    # target_latency_delta can be negative so log1p alone is insufficient.
+    df["signed_log_latency_delta"] = df["target_latency_delta"].apply(
+        lambda x: np.sign(x) * np.log1p(abs(x)) if pd.notna(x) else np.nan
+    )
     return df
 
 
@@ -350,6 +356,7 @@ def main(in_path: Path, out_path: Path):
         "service_depth", "service_downstream_count", "service_is_gateway",
         "fault_severity_ratio",
         "log_target_latency_mean_ms", "log_target_memory_bytes", "log_fault_value_numeric",
+        "signed_log_latency_delta",
         "system_error_rate", "system_latency_ratio",
     ]
     logger.info("Saved %d rows → %s", len(df), out_path)
