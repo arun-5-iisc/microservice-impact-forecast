@@ -161,10 +161,31 @@ def plot_blast_radius(df_exp: pd.DataFrame, out_dir: Path) -> None:
 def main(data_path: Path, out_dir: Path) -> None:
     df = pd.read_csv(data_path)
 
-    # One row per experiment (blast_radius_final and severity are experiment-level labels;
-    # they are identical across all 4 T-snapshots of the same experiment)
+    print(f"Dataset: {len(df)} rows  |  {df['experiment_id'].nunique()} experiments")
+
+    # Verify that severity and blast_radius_final are truly constant per experiment
+    # (they should be — both are derived from the final 60 s state, not the T-snapshot)
+    inconsistent_sev = (
+        df.groupby("experiment_id")["severity"]
+        .nunique()
+        .gt(1)
+        .sum()
+    )
+    inconsistent_br = (
+        df.groupby("experiment_id")["blast_radius_final"]
+        .nunique()
+        .gt(1)
+        .sum()
+    )
+    if inconsistent_sev > 0 or inconsistent_br > 0:
+        print(f"WARNING: {inconsistent_sev} experiments have >1 severity value across snapshots")
+        print(f"WARNING: {inconsistent_br} experiments have >1 blast_radius_final across snapshots")
+    else:
+        print("Verified: severity and blast_radius_final are constant across all 4 snapshots per experiment")
+
+    # Reduce to one row per experiment for plotting
     df_exp = df.drop_duplicates(subset="experiment_id").copy()
-    print(f"Dataset: {len(df)} rows  |  {len(df_exp)} experiments")
+    print(f"Plotting with {len(df_exp)} experiments (one per experiment_id)")
     print(f"Severity counts:\n{df_exp['severity'].value_counts().reindex(SEVERITY_ORDER)}")
     print(f"Blast radius range: {df_exp['blast_radius_final'].min()} – {df_exp['blast_radius_final'].max()}")
 
