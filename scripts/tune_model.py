@@ -677,6 +677,11 @@ def main(data_path: Path, stage: str, clf_model: str, reg_model: str,
             for cls in SEVERITY_ORDER:
                 h_row[f"{cls}_f1"] = round(report[cls]["f1-score"], 4)
             pd.DataFrame([h_row]).to_csv(results_dir / "holdout_report.csv", index=False)
+            pd.DataFrame({
+                "model":      _LABELS[clf_model],
+                "true_label": le.inverse_transform(y_cls_test),
+                "pred_label": le.inverse_transform(y_pred.astype(int)),
+            }).to_csv(results_dir / "holdout_predictions.csv", index=False)
             logger.info(
                 "  %s clf holdout → accuracy=%.3f  macro-F1=%.3f  "
                 "[Low=%.3f  Med=%.3f  High=%.3f]",
@@ -700,6 +705,12 @@ def main(data_path: Path, stage: str, clf_model: str, reg_model: str,
                 "rmse": round(rmse, 4),
                 "r2":   round(r2,   4),
             }]).to_csv(results_dir / "holdout_regression_report.csv", index=False)
+            pd.DataFrame({
+                "model":             _LABELS[reg_model],
+                "true_blast_radius": y_reg_test,
+                "pred_blast_radius": y_pred,
+                "severity":          df_test["severity"].values,
+            }).to_csv(results_dir / "holdout_regression_predictions.csv", index=False)
             logger.info("  %s reg holdout → MAE=%.4f  RMSE=%.4f  R²=%.4f",
                         _LABELS[reg_model], mae, rmse, r2)
 

@@ -13,6 +13,7 @@ Figures:
   07_confusion_matrices.png   — OOF confusion matrices for tuned classifier(s)
   08_holdout_comparison.png   — CV vs holdout for winning clf (XGBoost) and reg (RF)
   09_optuna_convergence.png   — Bayesian search trial values + best-so-far curves
+  10_actual_vs_predicted.png  — true vs predicted blast radius on holdout, coloured by severity
 
 Usage:
   python scripts/visualize.py
@@ -348,13 +349,15 @@ def plot_full_model_comparison(df: pd.DataFrame, out_dir: Path, fmt: str):
 # Figure 7: Confusion matrices for tuned models
 # ─────────────────────────────────────────────────────────────────────────────
 
-def plot_confusion_matrices(oof_df: pd.DataFrame, out_dir: Path, fmt: str):
+def plot_confusion_matrices(preds_df: pd.DataFrame, out_dir: Path, fmt: str,
+                            source: str = "Holdout"):
     """
-    Side-by-side confusion matrices for tuned classifier models (OOF predictions).
+    Side-by-side confusion matrices for tuned classifier models.
+    source: label shown in the figure title ("Holdout" or "OOF").
     """
     CLASSES  = ["Low", "Medium", "High"]
     _PALETTES = ["Blues", "Greens", "Oranges", "Purples"]
-    models   = sorted(oof_df["model"].unique())
+    models   = sorted(preds_df["model"].unique())
     titles   = [f"Tuned {m}" for m in models]
     colors   = [_PALETTES[i % len(_PALETTES)] for i in range(len(models))]
 
@@ -364,7 +367,7 @@ def plot_confusion_matrices(oof_df: pd.DataFrame, out_dir: Path, fmt: str):
         axes = [axes]
 
     for ax, model, title, cmap in zip(axes, models, titles, colors):
-        mdf = oof_df[oof_df["model"] == model]
+        mdf = preds_df[preds_df["model"] == model]
         if mdf.empty:
             ax.set_visible(False)
             continue
@@ -393,7 +396,7 @@ def plot_confusion_matrices(oof_df: pd.DataFrame, out_dir: Path, fmt: str):
                         ha="center", va="center", fontsize=11,
                         color=color, fontweight="bold")
 
-    fig.suptitle(f"Confusion Matrices — Tuned Models (OOF Predictions)", fontsize=13, y=1.02)
+    fig.suptitle(f"Confusion Matrices — Tuned Models ({source} Predictions)", fontsize=13, y=1.02)
     plt.tight_layout()
     _save(fig, out_dir, "07_confusion_matrices", fmt)
 
@@ -537,6 +540,71 @@ def plot_optuna_convergence(res_dir: Path, out_dir: Path, fmt: str):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Figure 10: Actual vs Predicted scatter (holdout regression)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def plot_actual_vs_predicted(
+    reg_preds: pd.DataFrame,
+    holdout_reg: pd.DataFrame | None,
+    out_dir: Path,
+    fmt: str,
+):
+    """
+    Scatter plot of true vs predicted blast_radius_final on the holdout set.
+    Points are coloured by severity class and jittered horizontally to avoid
+    overplotting (true values are integers).
+    """
+    SEVERITY_COLORS = {"Low": "#55A868", "Medium": "#DD8452", "High": "#C00000"}
+
+    true_vals  = reg_preds["true_blast_radius"].values.astype(float)
+    pred_vals  = reg_preds["pred_blast_radius"].values.astype(float)
+    severities = reg_preds["severity"].values if "severity" in reg_preds.columns else None
+
+    rng    = np.random.default_rng(42)
+    jitter = rng.uniform(-0.15, 0.15, size=len(true_vals))
+
+    fig, ax = plt.subplots(figsize=(7, 6))
+
+    if severities is not None:
+        for sev, color in SEVERITY_COLORS.items():
+            mask = severities == sev
+            if mask.any():
+                ax.scatter(
+                    true_vals[mask] + jitter[mask], pred_vals[mask],
+                    color=color, label=sev, alpha=0.75, s=65,
+                    edgecolors="white", linewidth=0.5,
+                )
+        ax.legend(title="Severity", frameon=True, fontsize=10)
+    else:
+        ax.scatter(true_vals + jitter, pred_vals, color="#4C72B0", alpha=0.75, s=65)
+
+    lo = min(true_vals.min(), pred_vals.min()) - 0.5
+    hi = max(true_vals.max(), pred_vals.max()) + 0.5
+    ax.plot([lo, hi], [lo, hi], "k--", linewidth=1, alpha=0.6, label="Perfect prediction")
+
+    if holdout_reg is not None:
+        mae  = float(holdout_reg["mae"].iloc[0])
+        rmse = float(holdout_reg["rmse"].iloc[0])
+        r2   = float(holdout_reg["r2"].iloc[0]) if "r2" in holdout_reg.columns else None
+        txt  = f"MAE  = {mae:.3f}\nRMSE = {rmse:.3f}"
+        if r2 is not None:
+            txt += f"\nR²   = {r2:.3f}"
+        ax.text(0.04, 0.96, txt, transform=ax.transAxes,
+                va="top", ha="left", fontsize=11,
+                bbox=dict(boxstyle="round,pad=0.4", facecolor="wheat", alpha=0.7))
+
+    ax.set_xlabel("True Blast Radius (services degraded)", fontsize=12)
+    ax.set_ylabel("Predicted Blast Radius", fontsize=12)
+    ax.set_title(
+        "Blast Radius — Actual vs Predicted  ·  Holdout Set (20 experiments × 4 snapshots)",
+        fontsize=11, fontweight="bold",
+    )
+    ax.spines[["top", "right"]].set_visible(False)
+    plt.tight_layout()
+    _save(fig, out_dir, "10_actual_vs_predicted", fmt)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Main
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -554,9 +622,11 @@ def main(res_dir: Path, out_dir: Path, fmt: str, stage: str = "fe_tuned"):
     feat_imp    = _load(fe_dir,    "feature_importance.csv")
     acc_t       = _load(fe_dir,    "accuracy_vs_time.csv")
     acc_t_tu    = _load(tuned_dir, "accuracy_vs_time_tuned.csv")
-    oof_preds   = _load(tuned_dir, "oof_predictions.csv")
-    holdout_clf = _load(tuned_dir, "holdout_report.csv")
-    holdout_reg = _load(tuned_dir, "holdout_regression_report.csv")
+    oof_preds      = _load(tuned_dir, "oof_predictions.csv")
+    holdout_preds  = _load(tuned_dir, "holdout_predictions.csv")
+    holdout_clf    = _load(tuned_dir, "holdout_report.csv")
+    holdout_reg    = _load(tuned_dir, "holdout_regression_report.csv")
+    reg_preds      = _load(tuned_dir, "holdout_regression_predictions.csv")
 
     # ── Figure 1: Stage progression ──────────────────────────────────────────
     if final is not None:
@@ -584,11 +654,14 @@ def main(res_dir: Path, out_dir: Path, fmt: str, stage: str = "fe_tuned"):
     if final is not None:
         plot_full_model_comparison(final, out_dir, fmt)
 
-    # ── Figure 7: Confusion matrices ─────────────────────────────────────────
-    if oof_preds is not None:
-        plot_confusion_matrices(oof_preds, out_dir, fmt)
+    # ── Figure 7: Confusion matrices (holdout preferred over OOF) ────────────
+    if holdout_preds is not None:
+        plot_confusion_matrices(holdout_preds, out_dir, fmt, source="Holdout")
+    elif oof_preds is not None:
+        logger.warning("holdout_predictions.csv missing — falling back to OOF predictions")
+        plot_confusion_matrices(oof_preds, out_dir, fmt, source="OOF")
     else:
-        logger.warning("oof_predictions.csv missing — run: python scripts/tune_model.py --eval-only")
+        logger.warning("holdout_predictions.csv missing — run: python scripts/tune_model.py --task clf --eval-only")
 
     # ── Figure 8: CV vs holdout comparison ───────────────────────────────────
     if holdout_clf is not None or holdout_reg is not None:
@@ -598,6 +671,13 @@ def main(res_dir: Path, out_dir: Path, fmt: str, stage: str = "fe_tuned"):
 
     # ── Figure 9: Optuna convergence ─────────────────────────────────────────
     plot_optuna_convergence(res_dir, out_dir, fmt)
+
+    # ── Figure 10: Actual vs Predicted scatter (holdout regression) ───────────
+    if reg_preds is not None:
+        plot_actual_vs_predicted(reg_preds, holdout_reg, out_dir, fmt)
+    else:
+        logger.warning("holdout_regression_predictions.csv missing — run: "
+                       "python scripts/tune_model.py --task reg --eval-only")
 
     logger.info("\nAll figures saved to %s/", out_dir)
 

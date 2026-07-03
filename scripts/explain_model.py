@@ -1,31 +1,28 @@
 """
 Model explainability: SHAP values and permutation importance.
 
-Loads a trained classifier pipeline (.joblib), transforms the training data
-through the preprocessor, then computes:
-  1. SHAP summary plot    — global feature impact (beeswarm)
-  2. SHAP bar plot        — mean |SHAP| per feature
-  3. Permutation importance — model-agnostic, cross-validated on training data
+Loads a trained pipeline (.joblib), transforms the training data through the
+preprocessor, then computes SHAP values and permutation importance.
 
-Uses the 110-experiment training split (holdout_ids.txt excluded) so the
-holdout remains completely unseen.
+Uses the 110-experiment training split (holdout_ids.txt excluded).
 
 Outputs (all in results/<stage>/plots/):
-  shap_summary.png
-  shap_bar.png
-  permutation_importance.png
-  permutation_importance.csv
+  clf task:  shap_summary.png, shap_bar.png, shap_values.csv
+             permutation_importance.png, permutation_importance.csv
+  reg task:  reg_shap_summary.png, reg_shap_bar.png, reg_shap_values.csv
 
 Usage:
+  # Classifier SHAP (XGBoost on base features):
   python scripts/explain_model.py \\
-      --model  models/fe_tuned/clf_lgbm_tuned.joblib \\
-      --data   dataset/processed/training_dataset_fe.csv \\
-      --stage  fe_tuned
+      --model models/fe_tuned/clf_xgb_tuned.joblib \\
+      --data  dataset/processed/training_dataset.csv \\
+      --task  clf
 
-  # or auto-detect stage from model path:
+  # Regressor SHAP (RandomForest on FE features):
   python scripts/explain_model.py \\
-      --model models/fe_tuned/clf_lgbm_tuned.joblib \\
-      --data  dataset/processed/training_dataset_fe.csv
+      --model models/fe_tuned/reg_rf_tuned.joblib \\
+      --data  dataset/processed/training_dataset_fe.csv \\
+      --task  reg
 """
 import argparse
 import logging
@@ -129,6 +126,49 @@ def _shap_plots(pipe, X_transformed: np.ndarray, feature_names: list[str],
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Regressor SHAP
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _reg_shap_plots(pipe, X_transformed: np.ndarray, feature_names: list[str],
+                    plots_dir: Path, model_name: str) -> None:
+    try:
+        import shap
+    except ImportError:
+        logger.error("shap not installed. Run: pip install shap")
+        return
+
+    estimator = pipe.named_steps["model"]
+    logger.info("Computing SHAP values for regressor %s…", model_name)
+
+    try:
+        explainer   = shap.TreeExplainer(estimator)
+        shap_values = explainer.shap_values(X_transformed)
+    except Exception as exc:
+        logger.error("SHAP TreeExplainer failed: %s", exc)
+        return
+
+    # Regression output is 2D (n_samples, n_features) — no class axis
+    plots_dir.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame(shap_values, columns=feature_names).to_csv(
+        plots_dir / "reg_shap_values.csv", index=False
+    )
+
+    for plot_type, suffix, title_suffix in [
+        ("dot", "reg_shap_summary", "beeswarm — blast_radius_final"),
+        ("bar", "reg_shap_bar",     "mean |SHAP| — blast_radius_final"),
+    ]:
+        plt.figure(figsize=(9, 6))
+        shap.summary_plot(shap_values, X_transformed, feature_names=feature_names,
+                          plot_type=plot_type, show=False, plot_size=None)
+        plt.title(f"SHAP {title_suffix} — {model_name}", fontsize=11)
+        plt.tight_layout()
+        path = plots_dir / f"{suffix}.png"
+        plt.savefig(path, dpi=150, bbox_inches="tight")
+        plt.close()
+        logger.info("  Saved → %s", path)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Permutation Importance
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -196,12 +236,12 @@ def _permutation_importance_plot(pipe, X: pd.DataFrame, y: np.ndarray,
 # Main
 # ─────────────────────────────────────────────────────────────────────────────
 
-def main(model_path: Path, data_path: Path, stage: str) -> None:
+def main(model_path: Path, data_path: Path, stage: str, task: str = "clf") -> None:
     plots_dir = REPO_ROOT / "results" / stage / "plots"
 
     logger.info("Loading model from %s", model_path)
     pipe = joblib.load(model_path)
-    model_name = model_path.stem   # e.g. "clf_lgbm_tuned"
+    model_name = model_path.stem
 
     logger.info("Loading dataset from %s", data_path)
     df = pd.read_csv(data_path)
@@ -218,38 +258,39 @@ def main(model_path: Path, data_path: Path, stage: str) -> None:
 
     numeric_features = [c for c in BASE_NUMERIC_FEATURES + FE_NUMERIC_FEATURES if c in df.columns]
     all_features     = numeric_features + CATEGORICAL_FEATURES
-    feature_names    = all_features
 
     X      = df[all_features]
     groups = df["experiment_id"].values
 
-    le = LabelEncoder()
-    le.classes_ = np.array(SEVERITY_ORDER)
-    y = le.transform(df["severity"])
+    # ── Build target and refit to get the preprocessor in fitted state ────────
+    if task == "reg":
+        y = df["blast_radius_final"].values.astype(float)
+    else:
+        le = LabelEncoder()
+        le.classes_ = np.array(SEVERITY_ORDER)
+        y = le.transform(df["severity"])
 
-    # ── Transform X through the preprocessor for SHAP ────────────────────────
-    # SHAP TreeExplainer needs the post-preprocessor array, not raw DataFrame.
-    pipe.fit(X, y)   # refit on full training data before extracting transformed X
-    preprocessor   = pipe.named_steps["pre"]
-    X_transformed  = preprocessor.transform(X)
+    pipe.fit(X, y)
+    preprocessor = pipe.named_steps["pre"]
+    X_transformed = preprocessor.transform(X)
 
-    # Reconstruct feature names after ColumnTransformer
     try:
-        transformed_names = preprocessor.get_feature_names_out()
-        # Strip sklearn prefix (e.g. "num__target_cpu" → "target_cpu")
-        transformed_names = [n.split("__", 1)[-1] for n in transformed_names]
+        transformed_names = [n.split("__", 1)[-1]
+                             for n in preprocessor.get_feature_names_out()]
     except Exception:
-        transformed_names = feature_names   # fallback
+        transformed_names = all_features
 
     logger.info("Feature matrix: %d rows × %d features", *X_transformed.shape)
 
-    # ── SHAP ─────────────────────────────────────────────────────────────────
-    _shap_plots(pipe, X_transformed, transformed_names, plots_dir, model_name)
-
-    # ── Permutation Importance ────────────────────────────────────────────────
-    _permutation_importance_plot(
-        pipe, X, y, groups, feature_names, plots_dir, model_name
-    )
+    if task == "reg":
+        # ── Regressor SHAP ───────────────────────────────────────────────────
+        _reg_shap_plots(pipe, X_transformed, transformed_names, plots_dir, model_name)
+    else:
+        # ── Classifier SHAP + permutation importance ──────────────────────────
+        _shap_plots(pipe, X_transformed, transformed_names, plots_dir, model_name)
+        _permutation_importance_plot(
+            pipe, X, y, groups, all_features, plots_dir, model_name
+        )
 
     logger.info("\nAll explainability outputs → %s/", plots_dir)
 
@@ -257,15 +298,16 @@ def main(model_path: Path, data_path: Path, stage: str) -> None:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="SHAP + permutation importance for a trained model")
     parser.add_argument("--model", type=Path, required=True,
-                        help="Path to trained classifier .joblib  "
-                             "(e.g. models/fe_tuned/clf_lgbm_tuned.joblib)")
+                        help="Path to trained model .joblib")
     parser.add_argument("--data",  type=Path,
                         default=REPO_ROOT / "dataset" / "processed" / "training_dataset_fe.csv",
-                        help="Feature-engineered dataset used for training")
+                        help="Dataset CSV used for training")
     parser.add_argument("--stage", type=str, default=None,
                         help="Results sub-directory (auto-detected from model path if omitted)")
+    parser.add_argument("--task",  choices=["clf", "reg"], default="clf",
+                        help="clf = classifier SHAP + permutation importance  "
+                             "reg = regressor SHAP  (default: clf)")
     args = parser.parse_args()
 
-    # Auto-detect stage from model path: models/fe_tuned/clf_lgbm_tuned.joblib → "fe_tuned"
     stage = args.stage or args.model.parent.name
-    main(args.model, args.data, stage)
+    main(args.model, args.data, stage, args.task)
