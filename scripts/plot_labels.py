@@ -16,7 +16,6 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
-import numpy as np
 import pandas as pd
 
 REPO_ROOT = Path(__file__).parent.parent
@@ -101,59 +100,29 @@ def plot_severity(df_exp: pd.DataFrame, out_dir: Path) -> None:
     _save(fig, out_dir, "labels_severity")
 
 
-def plot_blast_radius(df_exp: pd.DataFrame, out_dir: Path) -> None:
-    """Histogram + box-by-severity of blast_radius_final."""
-    values = df_exp["blast_radius_final"].dropna().astype(int)
-
-    fig, axes = plt.subplots(1, 2, figsize=(11, 4.5))
-
-    # ── Histogram ─────────────────────────────────────────────────────────────
-    ax = axes[0]
+def plot_blast_radius(df: pd.DataFrame, out_dir: Path) -> None:
+    """Histogram of blast_radius_final."""
+    values = df["blast_radius_final"].dropna().astype(int)
     unique_vals = sorted(values.unique())
     counts_by_val = values.value_counts().reindex(unique_vals, fill_value=0)
+
+    fig, ax = plt.subplots(figsize=(8, 4.5))
     ax.bar(unique_vals, counts_by_val.values,
            color="#4C72B0", edgecolor="white", linewidth=1.2, width=0.65)
     ax.set_xlabel("blast_radius_final  (number of services degraded)", fontsize=12)
-    ax.set_ylabel("Number of Experiments", fontsize=12)
-    ax.set_title("Blast Radius Distribution\n(520 rows — 130 experiments × 4 snapshots)", fontsize=13, fontweight="bold")
+    ax.set_ylabel("Number of Rows", fontsize=12)
+    ax.set_title(
+        "Blast Radius Distribution\n(520 rows — 130 experiments × 4 snapshots)",
+        fontsize=13, fontweight="bold"
+    )
     ax.set_xticks(unique_vals)
     for x, cnt in zip(unique_vals, counts_by_val.values):
         if cnt > 0:
             ax.text(x, cnt + 0.3, str(cnt), ha="center", va="bottom", fontsize=10)
     ax.spines[["top", "right"]].set_visible(False)
-
-    # ── Box plot by severity ───────────────────────────────────────────────────
-    ax = axes[1]
-    data_by_sev = [
-        df_exp.loc[df_exp["severity"] == s, "blast_radius_final"].dropna().astype(int).values
-        for s in SEVERITY_ORDER
-    ]
-    bp = ax.boxplot(
-        data_by_sev,
-        patch_artist=True,
-        medianprops={"color": "white", "linewidth": 2.5},
-        whiskerprops={"linewidth": 1.5},
-        capprops={"linewidth": 1.5},
-        flierprops={"marker": "o", "markersize": 5, "alpha": 0.5},
-    )
-    for patch, s in zip(bp["boxes"], SEVERITY_ORDER):
-        patch.set_facecolor(SEVERITY_COLORS[s])
-        patch.set_alpha(0.85)
-    ax.set_xticklabels(SEVERITY_ORDER, fontsize=13)
-    ax.set_ylabel("blast_radius_final", fontsize=12)
-    ax.set_title("Blast Radius by Severity Class", fontsize=13, fontweight="bold")
-    ax.spines[["top", "right"]].set_visible(False)
-
-    # annotate medians
-    for i, (data, s) in enumerate(zip(data_by_sev, SEVERITY_ORDER), start=1):
-        if len(data):
-            med = np.median(data)
-            ax.text(i, med + 0.15, f"med={med:.0f}", ha="center", va="bottom",
-                    fontsize=10, fontweight="bold", color="white")
-
     fig.suptitle(
         "Target Label 2: blast_radius_final  ·  Count of services degraded in final 60 s",
-        fontsize=11, color="#444444", y=1.01
+        fontsize=11, color="#444444", y=1.02
     )
     plt.tight_layout()
     _save(fig, out_dir, "labels_blast_radius")
