@@ -62,7 +62,7 @@ def plot_severity(df_exp: pd.DataFrame, out_dir: Path) -> None:
                 f"{count}\n({pct:.1f}%)",
                 ha="center", va="bottom", fontsize=12, fontweight="bold")
     ax.set_ylabel("Number of Experiments", fontsize=12)
-    ax.set_title("Severity Class Distribution\n(130 experiments)", fontsize=13, fontweight="bold")
+    ax.set_title("Severity Class Distribution\n(520 rows — 130 experiments × 4 snapshots)", fontsize=13, fontweight="bold")
     ax.set_ylim(0, counts.max() * 1.25)
     ax.spines[["top", "right"]].set_visible(False)
     ax.tick_params(axis="x", labelsize=13)
@@ -70,7 +70,7 @@ def plot_severity(df_exp: pd.DataFrame, out_dir: Path) -> None:
     # ── Pie chart ─────────────────────────────────────────────────────────────
     ax = axes[1]
     wedge_props = {"linewidth": 2, "edgecolor": "white"}
-    wedges, texts, autotexts = ax.pie(
+    _, _, autotexts = ax.pie(
         counts.values,
         labels=None,
         colors=colors,
@@ -93,7 +93,8 @@ def plot_severity(df_exp: pd.DataFrame, out_dir: Path) -> None:
     ax.set_title("Severity Distribution — Proportion", fontsize=13, fontweight="bold")
 
     fig.suptitle(
-        "Target Label 1: Severity  ·  3 classes derived from Prometheus + Jaeger signals",
+        "Target Label 1: Severity  ·  3 classes derived from Prometheus + Jaeger signals"
+        "  ·  proportions identical at experiment and row level",
         fontsize=11, color="#444444", y=1.01
     )
     plt.tight_layout()
@@ -114,7 +115,7 @@ def plot_blast_radius(df_exp: pd.DataFrame, out_dir: Path) -> None:
            color="#4C72B0", edgecolor="white", linewidth=1.2, width=0.65)
     ax.set_xlabel("blast_radius_final  (number of services degraded)", fontsize=12)
     ax.set_ylabel("Number of Experiments", fontsize=12)
-    ax.set_title("Blast Radius Distribution\n(130 experiments)", fontsize=13, fontweight="bold")
+    ax.set_title("Blast Radius Distribution\n(520 rows — 130 experiments × 4 snapshots)", fontsize=13, fontweight="bold")
     ax.set_xticks(unique_vals)
     for x, cnt in zip(unique_vals, counts_by_val.values):
         if cnt > 0:
@@ -161,36 +162,27 @@ def plot_blast_radius(df_exp: pd.DataFrame, out_dir: Path) -> None:
 def main(data_path: Path, out_dir: Path) -> None:
     df = pd.read_csv(data_path)
 
-    print(f"Dataset: {len(df)} rows  |  {df['experiment_id'].nunique()} experiments")
+    n_exp = df["experiment_id"].nunique()
+    print(f"Dataset: {len(df)} rows  |  {n_exp} experiments  ({n_exp} × 4 snapshots)")
 
-    # Verify that severity and blast_radius_final are truly constant per experiment
-    # (they should be — both are derived from the final 60 s state, not the T-snapshot)
-    inconsistent_sev = (
-        df.groupby("experiment_id")["severity"]
-        .nunique()
-        .gt(1)
-        .sum()
-    )
-    inconsistent_br = (
-        df.groupby("experiment_id")["blast_radius_final"]
-        .nunique()
-        .gt(1)
-        .sum()
-    )
+    # Verify that labels are constant per experiment (they should be — both are derived
+    # from the final 60 s state of the experiment, independent of the T-snapshot)
+    inconsistent_sev = df.groupby("experiment_id")["severity"].nunique().gt(1).sum()
+    inconsistent_br  = df.groupby("experiment_id")["blast_radius_final"].nunique().gt(1).sum()
     if inconsistent_sev > 0 or inconsistent_br > 0:
         print(f"WARNING: {inconsistent_sev} experiments have >1 severity value across snapshots")
         print(f"WARNING: {inconsistent_br} experiments have >1 blast_radius_final across snapshots")
     else:
         print("Verified: severity and blast_radius_final are constant across all 4 snapshots per experiment")
 
-    # Reduce to one row per experiment for plotting
-    df_exp = df.drop_duplicates(subset="experiment_id").copy()
-    print(f"Plotting with {len(df_exp)} experiments (one per experiment_id)")
-    print(f"Severity counts:\n{df_exp['severity'].value_counts().reindex(SEVERITY_ORDER)}")
-    print(f"Blast radius range: {df_exp['blast_radius_final'].min()} – {df_exp['blast_radius_final'].max()}")
+    # Plot at row level — the model trains and infers on rows (one per T-snapshot),
+    # not on experiments. 520 rows is the actual ML dataset size.
+    print(f"Plotting with {len(df)} rows (130 experiments × 4 time snapshots)")
+    print(f"Severity counts (rows):\n{df['severity'].value_counts().reindex(SEVERITY_ORDER)}")
+    print(f"Blast radius range: {df['blast_radius_final'].min()} – {df['blast_radius_final'].max()}")
 
-    plot_severity(df_exp, out_dir)
-    plot_blast_radius(df_exp, out_dir)
+    plot_severity(df, out_dir)
+    plot_blast_radius(df, out_dir)
     print("\nDone.")
 
 
