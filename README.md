@@ -1,54 +1,54 @@
 # Proactive impact forecasting of microservice changes
 
-When a change is applied to one service of a microservice application, this project forecasts, from only the first
-15–60 seconds of telemetry:
-- the **severity** of its effect on the changed service (Low / Medium / High);
-- its **blast radius**: how many other services are affected.
+Code and data for forecasting what a change to one microservice will do, using only the first 15 to 60 seconds of
+telemetry after the change. Two things are forecast: the severity of the effect on the changed service (Low, Medium
+or High), and the blast radius, i.e. how many other services get affected.
 
-It also evaluates LLM agents that investigate the change through tools (MCP) and retrieval (RAG), alone and combined
-with the ML forecast.
+On top of the ML models there is an LLM agent that investigates a change using tools (over MCP) and summaries of past
+incidents (RAG). It was tested on its own, with the ML forecast as extra input, and behind the ML model as a gate.
 
-The test bed is Google's [Online Boutique](https://github.com/GoogleCloudPlatform/microservices-demo) (v0.10.5) on
-GKE. Prometheus and Jaeger record the telemetry, and changes are injected with Helm, `kubectl` and Chaos Mesh.
+Everything runs on Google's [Online Boutique](https://github.com/GoogleCloudPlatform/microservices-demo) demo
+(v0.10.5) on GKE. Prometheus and Jaeger collect the telemetry, and the changes are made with Helm, kubectl and
+Chaos Mesh.
 
-## Repository layout
+## What's where
 
-| Path | Contents |
-|---|---|
-| `deployment/`, `monitoring/` | Cluster software: Online Boutique Helm chart and values, Chaos Mesh, Jaeger, kube-prometheus-stack (versions pinned in the install scripts) |
-| `config/project.yaml` | The cluster the data was collected on (namespace, zone, node count) |
-| `scripts/` | Experiment harness (`run_experiment.py`, `run_batch.py`), ML pipeline (`run_pipeline.sh` and its stages), shared measurement (`span_measures.py`) |
-| `scripts/analysis/` | Label-reliability and robustness analyses (`run_analyses.sh`, see its README) |
-| `genai/` | LLM incident agent: replay of recorded runs, MCP server, RAG, agent, evaluation, live mode; prompt versions in `prompts/` |
-| `experiments/plans/` | The experiment plans (CSV) of the four collection phases; see `scripts/README.md` |
-| `dataset/` | `processed/`: labels, features and the fixed holdout. The plan state files (which run each plan row produced). The raw runs go in `raw/` (see [Data](#data)). |
-| `results/`, `models/` | Pipeline, analysis and LLM-evaluation outputs; trained models |
-| `scripts/report/` | Generate the dissertation's tables, numbers, figures and diagrams from the result files |
+- `deployment/`, `monitoring/` - install scripts for Online Boutique, Chaos Mesh, Jaeger and kube-prometheus-stack
+  (versions are pinned in the scripts)
+- `config/project.yaml` - the cluster the data was collected on
+- `scripts/` - running experiments (`run_experiment.py`, `run_batch.py`) and the ML pipeline (`run_pipeline.sh`).
+  `span_measures.py` does the trace measurements the labels are built from
+- `scripts/analysis/` - label reliability and robustness checks (it has its own README)
+- `scripts/report/` - makes the report's tables and figures from the result files
+- `genai/` - the LLM agent: MCP server, RAG, replay of recorded runs, evaluation and live mode. Prompts are in
+  `genai/prompts/`
+- `experiments/plans/` - the experiment plan for each collection phase
+- `dataset/processed/` - labels, features and the holdout list. The raw runs go in `dataset/raw/` (see [Data](#data))
+- `results/`, `models/` - outputs and trained models
 
-## What can be reproduced, and how
+## Reproducing the results
 
-| Level | Needs | Reproduces |
-|---|---|---|
-| **A. From the recorded data** | This repository, the raw data (see [Data](#data)), Python | All ML results, the label analyses and the report tables. The LLM evaluation additionally needs an API key. |
-| **B. Collecting new data** | A GCP project with GKE | New experiment runs. Timings vary between clusters, so the runs are comparable but not identical. |
+With the recorded data (download it as described under [Data](#data)) you can rerun all the ML results, the label
+analyses and the report tables on any machine with Python. The LLM evaluation needs API keys as well.
 
-### 0. Setup
+Collecting new data needs a GCP project with GKE. Timings differ between clusters, so new runs will be comparable to
+these but not identical.
+
+### Setup
 
 ```bash
-python3 -m venv venv                                     # Python 3.13.5 was used
-venv/bin/pip install -r requirements.txt                 # ML pipeline (versions pinned)
-venv/bin/pip install -r genai/requirements.txt           # LLM evaluation (versions pinned)
+python3 -m venv venv                              # Python 3.13.5 was used
+venv/bin/pip install -r requirements.txt
+venv/bin/pip install -r genai/requirements.txt    # only needed for the LLM part
 ```
 
-The results were produced on a VM with 2 vCPUs and 8 GB of RAM. Scripts that read the large raw trace files cap their
-memory and load one file at a time.
+Both requirements files pin their versions. Everything was run on a VM with 2 vCPUs and 8 GB of RAM; the scripts that
+read the big trace files load one file at a time and cap their memory to stay within that.
 
-### 1. Cluster and software (level B only)
+### Cluster (only for new data)
 
-Tools: `gcloud`, `kubectl`, `helm` 3. `config/project.yaml` records the cluster the data was collected on; set the
-namespace there if you use a different one. The final dataset was collected on a **GKE Standard** cluster (not
-Autopilot, which blocks Chaos Mesh) with a node pool `e2-pool` of **3 x e2-standard-2** regular VMs in
-`us-central1-b`. An equivalent setup:
+You need gcloud, kubectl and helm 3. The data was collected on a GKE Standard cluster (Autopilot doesn't allow Chaos
+Mesh) with a node pool `e2-pool` of 3 x e2-standard-2 regular VMs in us-central1-b. This gives the same setup:
 
 ```bash
 gcloud container clusters create ff-2 --zone us-central1-b --num-nodes 1
@@ -62,153 +62,130 @@ gcloud container clusters get-credentials ff-2 --zone us-central1-b
 ./deployment/online-boutique/install.sh           # Online Boutique v0.10.5 with the project's values.yaml
 ```
 
-### 2. Experiments (level B only)
+If you use a different namespace, change it in `config/project.yaml`.
 
-Each run records a 60 s baseline, applies one change (CPU limit, memory limit, network latency or replicas to 0) and
-holds it for 180 s, then undoes it and records 60 s of recovery (applying and undoing take a few seconds, so the
-recorded phases are about 186 s and 78 s). It saves `metadata.json`, `prometheus.csv`, `traces.json` and
-`events.json` to `dataset/raw/EXP_<n>/`.
+`monitoring/kube-prometheus-stack/values.yaml` sets a Grafana admin password that is only meant for a lab cluster.
+Change it if anyone else can reach yours.
+
+### Running experiments
+
+A run records 60 s of baseline, applies one change (CPU limit, memory limit, network latency, or replicas set to 0),
+keeps it for 180 s, undoes it and records 60 s of recovery. Applying and undoing take a few seconds, so the recorded
+phases end up about 186 s and 78 s long. Each run is saved in `dataset/raw/EXP_<n>/` as `metadata.json`,
+`prometheus.csv`, `traces.json` and `events.json`.
 
 ```bash
-python scripts/run_experiment.py --help                                   # one run
+python scripts/run_experiment.py --help                                   # a single run
 python scripts/run_batch.py --plan experiments/plans/<plan>.csv --dry-run # a batch (resumable; --status, --limit N)
 ```
 
-`run_batch.py` checks before every run that the cluster is in its baseline state. Long batches should run under a
-service account, because user logins can expire mid-batch.
-- **Every phase of the data collection is a plan file** in `experiments/plans/`, with a state file in `dataset/`
-  recording which run each row produced (`scripts/README.md` has the table).
-- **Run IDs are numbered per attempt,** so a gap in the sequence (e.g. EXP_0183) is an attempt that failed before
-  recording any data.
-- **Grafana:** `monitoring/kube-prometheus-stack/values.yaml` sets a lab-only Grafana admin password. Change it on
-  any cluster that others can reach.
+`run_batch.py` won't start a run unless the cluster is back in its baseline state. For long batches use a service
+account, since a user login can expire halfway through.
 
-### 3. ML pipeline (level A)
+Each collection phase has a plan file in `experiments/plans/` and a state file in `dataset/` that records which run
+came from which plan row (`scripts/README.md` has the full table). Run IDs are given per attempt, so a missing number
+such as EXP_0183 is an attempt that failed before it recorded anything.
+
+### ML pipeline
 
 ```bash
-./scripts/run_pipeline.sh --yes          # stages logged to logs/pipeline/
+./scripts/run_pipeline.sh --yes          # logs go to logs/pipeline/
 ```
 
-The stages are:
-1. labels and early features (`preprocess.py`);
-2. label-threshold analysis;
-3. the fixed holdout check;
-4. base feature analysis;
-5. feature engineering;
-6. untuned models;
-7. tuning (Optuna);
-8. the final model stage;
-9. SHAP explanations;
-10. plots.
+In order, it runs: labels and early features (`preprocess.py`), the label threshold analysis, the holdout check,
+feature analysis, feature engineering, the untuned models, tuning with Optuna, the final models, SHAP and the plots.
 
-The 50-run holdout is fixed in `dataset/processed/holdout_ids.txt`. It was drawn once (seed 42) before any model was
-trained, and it is reused, not redrawn. The draw is stratified by severity, so it depends on the labels
-it was drawn with: the midterm labels, frozen in `scripts/analysis/midterm_labels.csv`. This command redraws it and
-confirms it is identical:
+The holdout is the 50 runs in `dataset/processed/holdout_ids.txt`. It was drawn once with seed 42 before any model was
+trained, and it has not been redrawn since. The draw is stratified by severity, so it depends on the labels used at
+the time, the midterm labels, which are saved in `scripts/analysis/midterm_labels.csv`. To check it, redraw it and
+compare:
 
 ```bash
 venv/bin/python scripts/create_holdout.py --data scripts/analysis/midterm_labels.csv --check
 ```
 
-### 4. Label analyses (level A)
+### Label analyses
 
 ```bash
-./scripts/analysis/run_analyses.sh       # -> results/reliability/ (needs the pipeline outputs and the span cache)
+./scripts/analysis/run_analyses.sh       # writes to results/reliability/
 ```
 
-### 5. LLM evaluation (level A, needs an API key)
+This needs the pipeline outputs and the span cache, so run the pipeline and `./scripts/run_genai_eval.sh prepare`
+first.
 
-Keys are read from `ANTHROPIC_API_KEY` or `~/.anthropic_key` (Claude models), and from `OPENAI_API_KEY` or
-`~/.openai_key` (OpenAI models). They are never printed or saved in the results.
+### LLM evaluation
+
+API keys are read from `ANTHROPIC_API_KEY` or `~/.anthropic_key` for Claude, and from `OPENAI_API_KEY` or
+`~/.openai_key` for OpenAI. They are never printed or written to the results.
 
 ```bash
 ./scripts/run_genai_eval.sh prepare                    # span cache, RAG index and development set
 ./scripts/run_genai_eval.sh retrieval                  # RAG retrieval evaluation
 ./scripts/run_genai_eval.sh dev 0 --yes                # development rounds 0 and 1 (prompts in genai/prompts/)
 ./scripts/run_genai_eval.sh dev 1 --yes
-REPEATS=3 MODEL=claude-opus-5-5 ./scripts/run_genai_eval.sh holdout --yes      # likewise claude-haiku-5-5, gpt-6-sol
+REPEATS=3 MODEL=claude-opus-5-5 ./scripts/run_genai_eval.sh holdout --yes      # same for claude-haiku-5-5, gpt-6-sol
 MODEL=claude-opus-5-5 ./scripts/run_genai_eval.sh sensitivity --yes
-./scripts/run_genai_eval.sh analyze                    # summary: means over repeats, 95% CIs, paired comparisons
+./scripts/run_genai_eval.sh analyze                    # means over repeats, 95% CIs, paired comparisons
 ```
 
-- **Protocol:** the prompt is refined on training incidents only (`genai/prompts/README.md`), then frozen; the holdout
-  is run with the frozen configuration, and its analysis plan was fixed before any holdout run. The report describes
-  each decision.
-- **Saved evidence:** every investigation saves its prompt, full transcript, tool calls and report in a folder next
-  to its `results.csv`. In this repository only the `results.csv` files are included; the folders are kept in Google
-  Cloud Storage (`results/genai/README.md`).
-- **Pausing:** a run that runs out of API credit stops cleanly; re-running the same command continues it.
-- **Variation:** LLM answers vary from run to run, so re-runs reproduce the scores approximately, not answer for
-  answer. The holdout repeats measure this variation.
+The prompt was tuned on training incidents only (see `genai/prompts/README.md`) and then frozen. The holdout was run
+with the frozen setup, and how it would be analysed was decided before the first holdout run.
 
-### 5b. Live mode with Slack alerts (level B, optional)
+Every investigation saves its prompt, the full transcript, the tool calls and the agent's report in a folder next to
+its `results.csv`. Only the `results.csv` files are in git; the folders are in the bucket (see
+`results/genai/README.md`).
 
-The evaluated system can also watch a real cluster. It detects a change, screens it with the ML model, has the LLM
-agent investigate, and posts the result to Slack: the severity, root cause, affected services, the recommended
-action with commands and runbook steps, and the evidence. It only recommends; nothing is changed automatically.
+If a run stops because the API credit runs out, run the same command again and it carries on. LLM answers aren't
+deterministic, so a rerun gives roughly the same scores but not the same answers. That's why the holdout was run
+three times.
+
+### Live mode with Slack (optional, needs a cluster)
+
+The same system can watch a real cluster. When it sees a change, it screens it with the ML model, lets the agent
+investigate if the forecast is Medium or High, and posts to Slack: the severity, the likely cause, the affected
+services, what to do (commands and runbook steps) and the evidence. It only suggests; it never changes anything
+itself.
 
 ```bash
-# Slack: create an app with an Incoming Webhook for a channel, then save its URL (never printed):
+# create a Slack app with an Incoming Webhook for a channel, then save its URL (it is never printed):
 read -rsp "Slack webhook URL: " W; echo; printf '%s' "$W" > ~/.slack_webhook; chmod 600 ~/.slack_webhook; unset W
 
-venv/bin/python -m genai.live simulate --run EXP_0284 --at 30 --model test --dry-run   # test without a cluster or an LLM
-venv/bin/python -m genai.live watch                       # terminal 1: watch the cluster, alert on Medium/High
+venv/bin/python -m genai.live simulate --run EXP_0284 --at 30 --model test --dry-run   # try it without a cluster or an LLM
+venv/bin/python -m genai.live watch                       # terminal 1: watch the cluster
 venv/bin/python -m genai.live inject --service productcatalogservice --fault latency --value 200 --hold 180   # terminal 2
 ```
 
-`watch` uses gpt-6-sol by default, the most accurate agent in the gated holdout evaluation (`--model` to change it;
-it needs the OpenAI key, see step 5). Each incident is saved in
-`results/genai/live/<incident id>/` (features, forecast, transcript, report and Slack payload), and its telemetry
-snapshot in `results/genai/live/snapshots/`; these records are not in git. Add `--dry-run` to print the Slack messages
-instead of sending them.
+`watch` uses gpt-6-sol by default, since it did best in the gated holdout evaluation, so it needs the OpenAI key. Use
+`--model` to pick another one, and `--dry-run` to print the Slack message instead of sending it. Each incident is
+saved in `results/genai/live/<incident id>/` (features, forecast, transcript, report and Slack payload), with its
+telemetry snapshot in `results/genai/live/snapshots/`. None of this is in git.
 
-### 6. Report
+### Tables and figures
 
 ```bash
-export REPORT_DIR=<your LaTeX project>        # optional; without it the output goes to report/
-venv/bin/python scripts/report/make_tables.py    # tables and numbers from results/ → $REPORT_DIR/tables/
-venv/bin/python scripts/report/make_figures.py   # data figures from results/ → $REPORT_DIR/figures/
-venv/bin/python scripts/report/make_diagrams.py  # system and pipeline diagrams → $REPORT_DIR/figures/
+venv/bin/python scripts/report/make_tables.py    # tables and numbers -> report/tables/
+venv/bin/python scripts/report/make_figures.py   # data figures -> report/figures/
+venv/bin/python scripts/report/make_diagrams.py  # system and pipeline diagrams -> report/figures/
 ```
-
-The dissertation's LaTeX sources are not in this repository. The scripts write into the folder given by
-`REPORT_DIR` (for example a clone of the Overleaf project), or into a local `report/` folder if it is not set.
 
 ## Data
 
-- **Final dataset:** 244 runs (1 from phase 1, 35 from phase 2 and 208 from phase 3), all on 3 x e2-standard-2.
-- **Superseded:** 89 earlier runs on 2 x e2-standard-2 did not have enough CPU (pods could not be scheduled or were
-  evicted), so the same settings were re-run on the final hardware (`experiments/plans/phase3_rerun.csv`).
-- **Excluded:** 18 runs were set aside: 15 with data problems (traces lost after a Jaeger restart or at the trace
-  download limit, a cluster not back in its baseline state, or timing that deviated from the protocol), and 3 valid
-  replication runs on different hardware (3 x n1-standard-4). One interrupted run with no data (EXP_0203) was also
-  set aside. The settings with data problems were re-run (`experiments/plans/phase3_targeted.csv`).
-- **Tracing coverage:** adservice, cartservice and shippingservice export no traces in Online Boutique v0.10.5; they
-  are measured from their callers' spans (`scripts/span_measures.py`).
-
-The raw data is about 20 GB, mostly `traces.json`, and is **not stored in git**. The 244 runs of the final dataset
-are in Google Cloud Storage at `gs://ff-impact-forecast-data/raw/`; download them into `dataset/raw/` with
+The raw runs are about 20 GB (mostly `traces.json`), so they're not in git. The 244 runs of the final dataset are in a
+public bucket. Download them into `dataset/raw/`:
 
 ```bash
 gcloud storage cp -r gs://ff-impact-forecast-data/raw/* dataset/raw/
 ```
 
-The bucket also holds the LLM transcripts under `genai/` (`results/genai/README.md`). The superseded and excluded
-runs are not shared.
-The derived span cache (`dataset/spans/`, about 40 MB) is rebuilt from the raw data with
-`./scripts/run_genai_eval.sh prepare`.
+The LLM transcripts are in the same bucket under `genai/`. The span cache (`dataset/spans/`, about 40 MB) isn't in git
+either; `./scripts/run_genai_eval.sh prepare` rebuilds it from the raw data.
 
-**What is in git and what is not** (see `.gitignore`):
-- **In git:**
-  - the code, the experiment plans with their state files, and `dataset/processed/` (labels, features, the fixed
-    holdout);
-  - `results/`: the ML, analysis and LLM result files. For the LLM runs that means each run's `results.csv` (every
-    answer, its evidence text and scores); the per-investigation transcripts are in GCS (`results/genai/README.md`);
-  - `models/fe_tuned/` (the final severity and blast-radius models) and `models/rag_index/` (the RAG index), so
-    the LLM evaluation and live mode run without retraining; the other model files are rebuilt by the pipeline;
-  - the scripts that generate the report's tables and figures (`scripts/report/`).
-- **Not in git:**
-  - the dissertation's LaTeX sources (`report/`);
-  - the raw runs (`dataset/raw/`) and the superseded and excluded runs;
-  - the span cache and the live-mode records (`results/genai/live/`);
-  - the caches of the label analyses, and `logs/`.
+adservice, cartservice and shippingservice don't export traces in Online Boutique v0.10.5, so their spans are missing
+from `traces.json`. They are measured from the spans of the services that call them (`scripts/span_measures.py`).
+
+In git: the code, the plans and their state files, `dataset/processed/`, all the result files (for the LLM runs only
+`results.csv`, which has every answer, its evidence and its scores), and the final models in `models/fe_tuned/` and
+`models/rag_index/`, so the agent and live mode work without retraining. The other models are rebuilt by the
+pipeline.
+
+Not in git: the raw runs, the span cache, the live-mode records, the analysis caches and the logs.
