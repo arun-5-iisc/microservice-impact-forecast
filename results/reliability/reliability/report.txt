@@ -1,0 +1,101 @@
+Reproduction check (current definition vs midterm_labels.csv, 40 runs): OK
+
+=== 1. The 20 pairs under the current definition ===
+                    setting      runs      severity                       why (run 1 | run 2) base n (target) blast
+          checkout cpu 100m 0222/0312   Medium/High    lat +35% err 0.0% | lat +130% err 0.0%           47/67   5/3
+          checkout cpu 125m 0221/0313    Low/Medium      lat -3% err 0.0% | lat +77% err 0.0%           60/52   4/6
+          checkout cpu 150m 0220/0314 Medium/Medium      lat +33% err 0.0% | lat -7% err 2.1%           29/56   5/0
+       checkout latency 200 0271/0307     High/High lat +4489% err 0.0% | lat +7957% err 0.0%           35/69   6/6
+       checkout memory 64Mi 0253/0319       Low/Low     lat -22% err 0.0% | lat -24% err 0.0%           68/41   0/4
+          currency cpu 125m 0224/0305       Low/Low      lat +14% err 0.0% | lat -4% err 0.0%         182/136   3/0
+          email latency 100 0180/0311       Low/Low      lat -42% err 0.0% | lat -2% err 0.0%           35/32   5/4
+         email memory 100Mi 0165/0321      High/Low             restarts=1 | lat -5% err 0.0%           27/27   3/0
+          email memory 64Mi 0167/0320   Medium/High            lat +69% err 0.0% | restarts=1           30/31   4/4
+          email memory 80Mi 0166/0306    Medium/Low     lat +27% err 0.0% | lat -21% err 0.0%           26/29   2/1
+           payment cpu 100m 0234/0315       Low/Low     lat -48% err 0.0% | lat -42% err 0.0%           21/18   0/4
+           payment cpu 125m 0233/0309       Low/Low     lat -63% err 0.0% | lat -41% err 0.0%           17/14   0/1
+       payment memory 128Mi 0170/0322    Low/Medium     lat -11% err 0.0% | lat +32% err 0.0%           16/15   4/1
+       payment memory 160Mi 0169/0310   High/Medium    lat +214% err 0.0% | lat +87% err 0.0%           13/20   6/5
+       payment memory 192Mi 0168/0323       Low/Low     lat -17% err 0.0% | lat +17% err 0.0%           16/20   0/1
+    productcatalog cpu 100m 0219/0316    Low/Medium     lat -43% err 0.0% | lat +25% err 0.0%         156/161   0/3
+    productcatalog cpu 150m 0217/0317       Low/Low     lat -19% err 0.0% | lat -50% err 0.0%         160/152   0/2
+ recommendation latency 100 0278/0318       Low/Low     lat -15% err 0.0% | lat -13% err 0.0%         145/128   0/3
+recommendation memory 220Mi 0304/0324       Low/Low      lat +6% err 0.0% | lat -12% err 0.0%         140/147   2/1
+          shipping cpu 150m 0235/0308       Low/Low                   not traced | not traced               —   1/1
+
+=== 2. With NO fault: baseline 1st half vs 2nd half (30 s each), all cached runs ===
+        target_abs_delta_median  target_over_20pct  null_blast_10  null_blast_25  null_blast_50
+stat                                                                                           
+mean                       0.50               0.36           2.55           1.68           1.02
+median                     0.17               0.26           1.98           1.09           0.70
+trim10                     0.52               0.38           2.39           1.70           1.05
+(target_over_20pct = share of runs whose target 'latency delta' already exceeds the 20% Medium threshold with no fault; null_blast_X = services counted as 'affected' at threshold X with no fault)
+
+=== 3. Severity: agreement between the two runs of each setting, per definition ===
+  stat  min_n   window same_label  kappa_w Low/Med/High (40 runs)  current
+  mean      1  final60      12/20     0.50                 25/9/6     True
+  mean      1 final120      10/20     0.40                21/13/6    False
+  mean     20  final60      13/20     0.50                 27/8/5    False
+  mean     20 final120      11/20     0.41                23/12/5    False
+median      1  final60       8/20    -0.35                 28/7/5    False
+median      1 final120      11/20     0.11                 27/8/5    False
+median     20  final60      12/20    -0.22                 32/3/5    False
+median     20 final120      13/20     0.17                 31/4/5    False
+trim10      1  final60      12/20     0.38                 26/8/6    False
+trim10      1 final120      12/20     0.15                 26/8/6    False
+trim10     20  final60      14/20     0.23                 30/5/5    False
+trim10     20 final120      14/20     0.26                 28/7/5    False
+
+=== 4. Blast radius: agreement between the two runs of each setting, per definition ===
+  stat  thr  min_n   window  mean_abs_diff  same   icc  mean_value  null_mean  current
+  mean 0.10      1  final60           2.00  3/20  0.32        2.50       2.55     True
+  mean 0.10      1 final120           2.30  3/20  0.14        2.80       2.55    False
+  mean 0.10     20  final60           1.70  4/20  0.35        2.15        NaN    False
+  mean 0.10     20 final120           2.05  2/20  0.27        2.48        NaN    False
+  mean 0.25      1  final60           1.80  4/20  0.35        1.85       1.68    False
+  mean 0.25      1 final120           1.80  4/20  0.40        1.85       1.68    False
+  mean 0.25     20  final60           1.45  5/20  0.45        1.52        NaN    False
+  mean 0.25     20 final120           1.55  3/20  0.50        1.62        NaN    False
+  mean 0.50      1  final60           1.45  9/20  0.32        1.32       1.02    False
+  mean 0.50      1 final120           1.35  6/20  0.50        1.43       1.02    False
+  mean 0.50     20  final60           1.25 10/20  0.30        1.12        NaN    False
+  mean 0.50     20 final120           1.05  8/20  0.58        1.23        NaN    False
+median 0.10      1  final60           1.90  3/20  0.04        1.90       1.98    False
+median 0.10      1 final120           1.65  3/20  0.18        1.57       1.98    False
+median 0.10     20  final60           1.85  2/20  0.12        1.62        NaN    False
+median 0.10     20 final120           1.55  4/20  0.22        1.43        NaN    False
+median 0.25      1  final60           1.05  7/20  0.50        0.97       1.09    False
+median 0.25      1 final120           1.15  7/20  0.11        0.82       1.09    False
+median 0.25     20  final60           0.85  9/20  0.61        0.82        NaN    False
+median 0.25     20 final120           1.05  6/20  0.21        0.72        NaN    False
+median 0.50      1  final60           0.85 10/20  0.10        0.57       0.70    False
+median 0.50      1 final120           0.60 11/20 -0.13        0.40       0.70    False
+median 0.50     20  final60           0.70 12/20  0.14        0.50        NaN    False
+median 0.50     20 final120           0.50 12/20 -0.04        0.35        NaN    False
+(icc = share of variance that is between settings rather than between runs: 1 = perfectly reproducible, 0 = pure noise; null_mean = services counted with no fault, baseline halves)
+
+=== 5. Early target latency delta (model input) — rank correlation between runs, per T ===
+ T   stat  pairs  spearman
+15   mean     19      0.05
+15 median     19      0.30
+30   mean     19      0.08
+30 median     19     -0.06
+45   mean     19      0.12
+45 median     19      0.02
+60   mean     19      0.18
+60 median     19      0.28
+
+=== 6. Baseline sample size (traces with a root span in the 60 s baseline), target service ===
+     run        service  base_n  min_base_n_any_service
+EXP_0169 paymentservice      13                      13
+EXP_0309 paymentservice      14                      14
+EXP_0322 paymentservice      15                      15
+EXP_0170 paymentservice      16                      16
+EXP_0168 paymentservice      16                      16
+EXP_0233 paymentservice      17                      17
+EXP_0315 paymentservice      18                      18
+EXP_0310 paymentservice      20                      20
+EXP_0323 paymentservice      20                      20
+EXP_0234 paymentservice      21                      21
+EXP_0166   emailservice      26                      14
+EXP_0321   emailservice      27                      15

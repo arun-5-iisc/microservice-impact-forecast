@@ -1,0 +1,2 @@
+model,task,metric,baseline,tuned,improvement_pct,n_trials
+XGBoost,classification,macro_f1,0.6416,0.6825,6.4,50

@@ -29,8 +29,8 @@ class KubernetesCollector:
     ) -> dict:
         """
         Collect events and pod state for the given namespace/service.
-        start and end define the experiment window (stored in metadata only —
-        event filtering happens during preprocessing since kubectl returns all events).
+        start and end are only stored in the metadata. kubectl returns all events, so they are
+        filtered to the window later, during preprocessing.
         """
         return {
             "namespace": namespace,

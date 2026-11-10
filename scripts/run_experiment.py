@@ -1,14 +1,13 @@
 """
-Experiment orchestrator.
+Runs one experiment:
+  1. 60 s baseline
+  2. apply the change (fault) and hold it for 180 s
+  3. undo it, then 60 s of recovery
+  4. collect Prometheus metrics, Jaeger traces and Kubernetes events for the whole run
+  5. save them, with metadata.json, to dataset/raw/EXP_<n>/
 
-Runs a single controlled deployment experiment:
-  1. Collect baseline (60s)
-  2. Inject fault
-  3. Observe fault behaviour (180s)
-  4. Restore deployment
-  5. Observe recovery (60s)
-  6. Collect all data from Prometheus and Jaeger (range queries)
-  7. Save dataset
+Applying and undoing a change take a few seconds each, so the recorded fault phase is about
+186 s and the recovery about 78 s; metadata.json has the exact phase times.
 
 Usage:
   python run_experiment.py --service recommendationservice --fault cpu --value 50m
@@ -19,6 +18,7 @@ Usage:
 import argparse
 import json
 import logging
+import subprocess
 import sys
 import time
 from datetime import datetime, timezone
@@ -41,6 +41,7 @@ logger = logging.getLogger(__name__)
 
 REPO_ROOT = Path(__file__).parent.parent
 DATASET_RAW = REPO_ROOT / "dataset" / "raw"
+DATASET_EXCLUDED = REPO_ROOT / "dataset" / "excluded"   # runs set aside; their IDs stay taken
 
 BASELINE_DURATION = 60    # seconds
 FAULT_DURATION = 180      # seconds of observation after fault is applied
@@ -50,13 +51,38 @@ RECOVERY_DURATION = 60    # seconds of observation after restoration
 def next_experiment_id() -> str:
     DATASET_RAW.mkdir(parents=True, exist_ok=True)
     existing = sorted(
-        d.name for d in DATASET_RAW.iterdir()
+        d.name for root in (DATASET_RAW, DATASET_EXCLUDED) if root.exists()
+        for d in root.iterdir()
         if d.is_dir() and d.name.startswith("EXP_")
     )
     if not existing:
         return "EXP_0001"
     last_num = int(existing[-1].split("_")[1])
     return f"EXP_{last_num + 1:04d}"
+
+
+def _cluster_info() -> dict:
+    """Cluster the experiment runs on - the dataset spans clusters with different node counts."""
+    context = subprocess.run(
+        ["kubectl", "config", "current-context"],
+        capture_output=True, text=True, check=True,
+    ).stdout.strip()
+    nodes = json.loads(subprocess.run(
+        ["kubectl", "get", "nodes", "-o", "json"],
+        capture_output=True, text=True, check=True,
+    ).stdout)["items"]
+
+    parts = context.split("_")   # GKE contexts look like gke_<project>_<zone>_<cluster>
+    is_gke = context.startswith("gke_") and len(parts) == 4
+    return {
+        "name": parts[3] if is_gke else context,
+        "zone": parts[2] if is_gke else None,
+        "node_count": len(nodes),
+        "machine_types": sorted({
+            n["metadata"]["labels"].get("node.kubernetes.io/instance-type", "unknown")
+            for n in nodes
+        }),
+    }
 
 
 def run_experiment(service: str, fault_type: str, fault_value: str,
@@ -70,26 +96,35 @@ def run_experiment(service: str, fault_type: str, fault_value: str,
                 exp_id, service, fault_type, fault_value, traffic_level)
     logger.info("=" * 60)
 
+    cluster = _cluster_info()
+
     phases = {}
 
     set_traffic(traffic_level)
     experiment_start = datetime.now(timezone.utc)
 
     try:
-        # ── Phase 1: Baseline ─────────────────────────────────────────
+        # Phase 1: Baseline
         logger.info("[1/5] Baseline observation (%ds)", BASELINE_DURATION)
         phases["baseline"] = {"start": _now()}
         time.sleep(BASELINE_DURATION)
         phases["baseline"]["end"] = _now()
 
-        # ── Phase 2: Inject fault ─────────────────────────────────────
+        # Phase 2: Inject fault
         logger.info("[2/5] Injecting fault: %s=%s on %s", fault_type, fault_value, service)
         phases["fault"] = {"start": _now()}
         original_state = apply_fault(service, fault_type, fault_value)
-        time.sleep(FAULT_DURATION)
+        try:
+            time.sleep(FAULT_DURATION)
+        except BaseException:
+            # Ctrl+C or a stop signal mid-fault: undo the fault first, otherwise the
+            # next experiment would start on a cluster that still has it.
+            logger.warning("Interrupted during the fault phase — restoring %s first", service)
+            restore_deployment(service, original_state)
+            raise
         phases["fault"]["end"] = _now()
 
-        # ── Phase 3: Restore ──────────────────────────────────────────
+        # Phase 3: Restore
         logger.info("[3/5] Restoring deployment")
         phases["recovery"] = {"start": _now()}
         restore_deployment(service, original_state)
@@ -98,31 +133,32 @@ def run_experiment(service: str, fault_type: str, fault_value: str,
 
         experiment_end = datetime.now(timezone.utc)
 
-        # ── Phase 4: Collect Prometheus metrics ───────────────────────
+        # Phase 4: Collect Prometheus metrics
         logger.info("[4/5] Collecting infrastructure metrics from Prometheus")
         prom = PrometheusCollector()
         df = prom.collect(experiment_start, experiment_end, step=15)
         prom.save(df, exp_dir / "prometheus.csv")
 
-        # ── Phase 5: Collect Jaeger traces ────────────────────────────
+        # Phase 5: Collect Jaeger traces
         logger.info("[5/5] Collecting traces from Jaeger")
         jaeger = JaegerCollector()
         traces = jaeger.collect(experiment_start, experiment_end)
         jaeger.save(traces, exp_dir / "traces.json")
 
-        # ── Phase 6: Collect Kubernetes events ────────────────────────
+        # Phase 6: Collect Kubernetes events
         logger.info("[6/6] Collecting Kubernetes events")
         k8s = KubernetesCollector()
         events = k8s.collect("online-boutique", service, experiment_start, experiment_end)
         k8s.save(events, exp_dir / "events.json")
 
-        # ── Metadata ──────────────────────────────────────────────────
+        # Metadata
         metadata = {
             "experiment_id": exp_id,
             "service": service,
             "fault_type": fault_type,
             "fault_value": fault_value,
             "traffic_level": traffic_level,
+            "cluster": cluster,
             "baseline_duration": BASELINE_DURATION,
             "fault_duration": FAULT_DURATION,
             "recovery_duration": RECOVERY_DURATION,

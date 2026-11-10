@@ -38,10 +38,12 @@ def _run(cmd, check=True):
     logger.debug("Running: %s", " ".join(str(c) for c in cmd))
     result = subprocess.run(cmd, capture_output=True, text=True, check=False)
     if result.returncode != 0:
+        # With check=False the caller expects failures (e.g. 2-second rollout polls)
+        level = logging.ERROR if check else logging.DEBUG
         if result.stdout.strip():
-            logger.error("stdout: %s", result.stdout.strip())
+            logger.log(level, "stdout: %s", result.stdout.strip())
         if result.stderr.strip():
-            logger.error("stderr: %s", result.stderr.strip())
+            logger.log(level, "stderr: %s", result.stderr.strip())
         if check:
             raise subprocess.CalledProcessError(
                 result.returncode, cmd, result.stdout, result.stderr
@@ -88,7 +90,7 @@ def _wait_for_rollout_start(service, timeout=30):
              "-n", NAMESPACE, "--timeout=2s"],
             check=False,
         )
-        # Either it finished cleanly or it started but isn't ready yet — both mean
+        # Either it finished cleanly or it started but isn't ready yet
         # Kubernetes accepted the change and a rollout is underway.
         if result.returncode == 0 or "Waiting for" in result.stdout or "Waiting for" in result.stderr:
             logger.info("Rollout started for %s", service)
@@ -120,7 +122,7 @@ def apply_fault(service, fault_type, fault_value):
     elif fault_type == "memory":
         helm_key = _require_helm_key(service)
         revision = _helm_revision()
-        # Only reduce the limit — request stays unchanged so scheduling is unaffected.
+        # Only reduce the limit - request stays unchanged so scheduling is unaffected.
         # OOMKill triggers when actual usage exceeds the new (lower) limit.
         _run([
             "helm", "upgrade", "--reuse-values", HELM_RELEASE, CHART_PATH,

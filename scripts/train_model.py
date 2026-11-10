@@ -1,34 +1,21 @@
 """
-Train ML models for proactive deployment impact forecasting.
-
-Tasks:
-  1. Severity classification  — predict Low / Medium / High from early signals
-  2. Blast radius regression  — predict final blast_radius_final from early signals
-
-Models: RandomForest, XGBoost, LightGBM (all three for both tasks)
-
-Evaluation uses GroupKFold grouped by experiment_id so all 4 T-snapshots
-of the same experiment land in the same fold — prevents label leakage across
-the time-into-fault dimension.
-
-Works with both:
-  - Baseline dataset (training_dataset.csv)         — only base numeric/categorical cols
-  - FE dataset      (training_dataset_fe.csv)        — adds topology, log, ratio, system cols
-
-Extra FE columns are used automatically when present; absent columns are silently skipped.
-
-Outputs:
-  models/    — saved .joblib files for each model
-  results/   — classification_report.csv, regression_report.csv,
-               feature_importance.csv, accuracy_vs_time.csv
+Untuned models (random forest, XGBoost and LightGBM with default settings) for both tasks, severity
+classification and blast-radius regression from the early snapshot, compared with no-ML baselines on the
+same folds. All three classifiers use balanced class weights. Baselines:
+  RuleBaseline        only the latency thresholds, on the early snapshot (the midterm's baseline)
+  FullRuleBaseline    the whole labelling rule on the early snapshot ("severity stays as it is now")
+  EarlyBlastBaseline  final blast radius = blast radius at T
+  NoSpreadBaseline    final blast radius = 0 
+Cross-validation is GroupKFold grouped by experiment setting; the holdout runs are left out. Engineered
+features are used when the dataset has them. Outputs go to models/<stage>/ and results/<stage>/.
 
 Usage:
-  python scripts/train_model.py
-  python scripts/train_model.py --data dataset/processed/training_dataset.csv
-  python scripts/train_model.py --data dataset/processed/training_dataset_fe.csv
+  python scripts/train_model.py --data dataset/processed/training_dataset.csv --stage baseline
+  python scripts/train_model.py --data dataset/processed/training_dataset_fe.csv --stage fe
 """
 import argparse
 import logging
+import sys
 import warnings
 from pathlib import Path
 
@@ -48,8 +35,12 @@ from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import LabelEncoder, OrdinalEncoder
 from sklearn.impute import SimpleImputer
 from sklearn.compose import ColumnTransformer
+from sklearn.utils.class_weight import compute_sample_weight
 from xgboost import XGBClassifier, XGBRegressor
 from lightgbm import LGBMClassifier, LGBMRegressor
+
+sys.path.insert(0, str(Path(__file__).parent))
+from preprocess import _compute_severity   # the labelling rule - single source of truth
 
 warnings.filterwarnings("ignore", category=UserWarning)
 
@@ -103,14 +94,12 @@ FE_NUMERIC_FEATURES = [
 
 SEVERITY_ORDER = ["Low", "Medium", "High"]
 
-# Thresholds from preprocess.py — used by the rule-based baseline
+# Thresholds from preprocess.py - used by the rule-based baseline
 LATENCY_DELTA_HIGH   = 1.0
 LATENCY_DELTA_MEDIUM = 0.20
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # Preprocessing pipeline (built dynamically to match available columns)
-# ─────────────────────────────────────────────────────────────────────────────
 
 def _build_preprocessor(numeric_features: list[str]):
     numeric_pipe = Pipeline([
@@ -126,9 +115,7 @@ def _build_preprocessor(numeric_features: list[str]):
     ], remainder="drop")
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # Model definitions
-# ─────────────────────────────────────────────────────────────────────────────
 
 def _classifiers():
     return {
@@ -165,9 +152,7 @@ def _regressors():
     }
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # Feature importance (works across all three model families)
-# ─────────────────────────────────────────────────────────────────────────────
 
 def _get_importances(pipe, numeric_features: list[str]):
     estimator = pipe.named_steps["model"]
@@ -180,22 +165,14 @@ def _get_importances(pipe, numeric_features: list[str]):
     return pd.Series(imp, index=feat_names).sort_values(ascending=False)
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # Rule-based baseline (no ML)
-# ─────────────────────────────────────────────────────────────────────────────
 
-def _evaluate_rule_baseline(df: pd.DataFrame) -> dict:
+def latency_rule_severity(df: pd.DataFrame) -> np.ndarray:
     """
-    Non-ML baseline: predict severity using only the early target_latency_delta
-    threshold rule — the same boundaries used to create labels from the FINAL
-    window, now applied to the EARLY observation window.
-
-    NaN latency (uninstrumented services) → predict Low, since the rule has no
-    other signal.  This conservative fallback intentionally reveals the rule's
-    blind spot: High experiments caused by restarts or replica loss on
-    uninstrumented services will be misclassified as Low.
-
-    No cross-validation needed — the rule has no learnable parameters.
+    Latency-only rule: the label's latency thresholds applied to the EARLY
+    target_latency_delta. NaN latency (uninstrumented services) -> Low.
+    Kept for comparison with the midterm; it ignores the replica, restart and
+    error-rate rules, so it is a weak reference.
     """
     def _rule(v):
         if pd.isna(v) or v <= LATENCY_DELTA_MEDIUM:
@@ -204,25 +181,79 @@ def _evaluate_rule_baseline(df: pd.DataFrame) -> dict:
             return "Medium"
         return "High"
 
-    y_pred = df["target_latency_delta"].map(_rule).values
-    y_true = df["severity"].values
-
-    report = classification_report(
-        y_true, y_pred,
-        labels=SEVERITY_ORDER,
-        target_names=SEVERITY_ORDER,
-        output_dict=True,
-        zero_division=0,
-    )
-    report["accuracy"] = accuracy_score(y_true, y_pred)
-    return report
+    return df["target_latency_delta"].map(_rule).values
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Cross-validated evaluation (no retrain — fit on each fold)
-# ─────────────────────────────────────────────────────────────────────────────
+def full_rule_severity(df: pd.DataFrame) -> np.ndarray:
+    """
+    Full-rule (persistence) baseline: the complete labelling rule from
+    preprocess.py applied to the EARLY snapshot - "the final severity will be
+    what it is now". This is effectively reactive alerting, the fair no-ML
+    reference: a forecasting model adds value only where it beats this.
+    """
+    nz = lambda v: None if pd.isna(v) else v
+    cols = ["target_latency_delta", "target_error_rate", "target_restart_count", "target_replicas"]
+    return np.array([_compute_severity(*(nz(v) for v in row))
+                     for row in df[cols].itertuples(index=False)])
 
-def _evaluate_classifier(name, estimator, X, y_encoded, groups, le, numeric_features):
+
+def early_blast_radius(df: pd.DataFrame) -> np.ndarray:
+    """"final = early" baseline: predict the final blast radius as the blast radius at T."""
+    return df["blast_radius_early"].fillna(0).values.astype(float)
+
+
+def no_spread_baseline(df: pd.DataFrame) -> np.ndarray:
+    """"always 0" baseline: predict that the change spreads to no other service."""
+    return np.zeros(len(df), dtype=float)
+
+
+def baseline_cv_report(y_true: np.ndarray, y_pred: np.ndarray, groups: np.ndarray) -> dict:
+    """
+    Score a rule's predictions on the same GroupKFold folds, with the same
+    aggregation as _evaluate_classifier (per-fold F1 averaged, accuracy pooled),
+    so baseline and model numbers are directly comparable. Rules have no
+    parameters, so the folds only define how the scores are averaged.
+    """
+    fold_reports = [
+        classification_report(y_true[te], y_pred[te], labels=SEVERITY_ORDER,
+                              target_names=SEVERITY_ORDER, output_dict=True, zero_division=0)
+        for _, te in GroupKFold(n_splits=N_FOLDS).split(y_true, y_true, groups)
+    ]
+    agg = {cls: {m: np.mean([r[cls][m] for r in fold_reports])
+                 for m in ("precision", "recall", "f1-score")}
+           for cls in SEVERITY_ORDER + ["macro avg"]}
+    agg["accuracy"] = accuracy_score(y_true, y_pred)
+    return agg
+
+
+def baseline_cv_regression(y_true: np.ndarray, y_pred: np.ndarray, groups: np.ndarray) -> dict:
+    """Regression counterpart of baseline_cv_report, matching _evaluate_regressor's metrics."""
+    mae, rmse = [], []
+    for _, te in GroupKFold(n_splits=N_FOLDS).split(y_true, y_true, groups):
+        mae.append(mean_absolute_error(y_true[te], y_pred[te]))
+        rmse.append(np.sqrt(mean_squared_error(y_true[te], y_pred[te])))
+    return {"mae_mean": np.mean(mae), "mae_std": np.std(mae),
+            "rmse_mean": np.mean(rmse), "rmse_std": np.std(rmse)}
+
+
+# Cross-validated evaluation (no retrain - fit on each fold)
+
+def setting_groups(df: pd.DataFrame) -> np.ndarray:
+    """CV group per experiment setting, so repeat runs of a setting never split across folds."""
+    return (df["service"] + "|" + df["fault_type"] + "|" + df["fault_value"].astype(str)
+            + "|" + df["traffic_level"]).values
+
+
+def _evaluate_classifier(name, estimator, X, y_encoded, groups, le, numeric_features,
+                         balanced_weights: bool = False):
+    """
+    balanced_weights: fit with "balanced" sample weights computed on each training fold
+    (and on the full data for the refit). Used for XGBoost, which has no class_weight
+    option, so it is weighted like the other classifiers here and like the tuned model.
+    """
+    def _fit_kwargs(y):
+        return {"model__sample_weight": compute_sample_weight("balanced", y)} if balanced_weights else {}
+
     pipe = Pipeline([
         ("pre", _build_preprocessor(numeric_features)),
         ("model", estimator),
@@ -238,7 +269,7 @@ def _evaluate_classifier(name, estimator, X, y_encoded, groups, le, numeric_feat
         X_tr, X_te = X.iloc[train_idx], X.iloc[test_idx]
         y_tr, y_te = y_encoded[train_idx], y_encoded[test_idx]
 
-        pipe.fit(X_tr, y_tr)
+        pipe.fit(X_tr, y_tr, **_fit_kwargs(y_tr))
         y_pred = pipe.predict(X_te)
 
         for i, idx in enumerate(test_idx):
@@ -247,6 +278,7 @@ def _evaluate_classifier(name, estimator, X, y_encoded, groups, le, numeric_feat
 
         report = classification_report(
             y_te, y_pred,
+            labels=np.arange(len(le.classes_)),   # a fold may lack a class
             target_names=le.classes_,
             output_dict=True,
             zero_division=0,
@@ -272,7 +304,7 @@ def _evaluate_classifier(name, estimator, X, y_encoded, groups, le, numeric_feat
     agg["accuracy"] = accuracy_score(true_arr, preds_arr)
 
     # Refit on full data for feature importance + saved model
-    pipe.fit(X, y_encoded)
+    pipe.fit(X, y_encoded, **_fit_kwargs(y_encoded))
     imp = _get_importances(pipe, numeric_features)
 
     return pipe, agg, imp, preds_arr, true_arr
@@ -312,9 +344,7 @@ def _evaluate_regressor(name, estimator, X, y, groups, numeric_features):
     }, imp
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # Main
-# ─────────────────────────────────────────────────────────────────────────────
 
 def main(data_path: Path, stage: str):
     models_dir  = MODELS_DIR  / stage
@@ -327,7 +357,7 @@ def main(data_path: Path, stage: str):
     df = pd.read_csv(data_path)
     logger.info("Dataset: %d rows, %d experiments", len(df), df["experiment_id"].nunique())
 
-    # ── Exclude holdout experiments (locked until final Stage 2 evaluation) ────
+    # the holdout is left out here; it is scored only after tuning (tune_model.py)
     holdout_path = REPO_ROOT / "dataset" / "processed" / "holdout_ids.txt"
     if holdout_path.exists():
         holdout_ids = set(holdout_path.read_text().strip().splitlines())
@@ -356,9 +386,9 @@ def main(data_path: Path, stage: str):
     )
 
     X_train  = df_train[all_features]
-    groups   = df_train["experiment_id"].values
+    groups   = setting_groups(df_train)
 
-    # ── Task 1: Severity Classification ──────────────────────────────────────
+    # Task 1: Severity Classification
     logger.info("\n%s\nTask 1: Severity Classification\n%s", "="*55, "="*55)
 
     le = LabelEncoder()
@@ -370,29 +400,29 @@ def main(data_path: Path, stage: str):
     best_oof_preds = None
     best_oof_true  = None
 
-    # ── Rule-based baseline (no ML) ───────────────────────────────────────────
-    logger.info("Evaluating rule-based baseline (latency thresholds only)…")
-    rule_report = _evaluate_rule_baseline(df_train)
-    rule_row = {"model": "RuleBaseline"}
-    for cls in SEVERITY_ORDER:
-        rule_row[f"{cls}_f1"] = round(rule_report[cls]["f1-score"], 4)
-    rule_row["macro_f1"] = round(rule_report["macro avg"]["f1-score"], 4)
-    rule_row["accuracy"] = round(rule_report["accuracy"], 4)
-    clf_rows.append(rule_row)
-    logger.info(
-        "  RuleBaseline → accuracy=%.3f  macro-F1=%.3f  "
-        "[Low=%.3f  Med=%.3f  High=%.3f]",
-        rule_report["accuracy"],
-        rule_report["macro avg"]["f1-score"],
-        rule_report["Low"]["f1-score"],
-        rule_report["Medium"]["f1-score"],
-        rule_report["High"]["f1-score"],
-    )
+    # Rule-based baselines (no ML), scored on the same folds as the models
+    for rule_name, rule_pred in (("RuleBaseline", latency_rule_severity(df_train)),
+                                 ("FullRuleBaseline", full_rule_severity(df_train))):
+        rule_report = baseline_cv_report(df_train["severity"].values, rule_pred, groups)
+        rule_row = {"model": rule_name}
+        for cls in SEVERITY_ORDER:
+            rule_row[f"{cls}_f1"] = round(rule_report[cls]["f1-score"], 4)
+        rule_row["macro_f1"] = round(rule_report["macro avg"]["f1-score"], 4)
+        rule_row["accuracy"] = round(rule_report["accuracy"], 4)
+        clf_rows.append(rule_row)
+        logger.info(
+            "  %s → accuracy=%.3f  macro-F1=%.3f  [Low=%.3f  Med=%.3f  High=%.3f]",
+            rule_name, rule_report["accuracy"], rule_report["macro avg"]["f1-score"],
+            rule_report["Low"]["f1-score"], rule_report["Medium"]["f1-score"],
+            rule_report["High"]["f1-score"],
+        )
 
     for name, estimator in _classifiers().items():
         logger.info("Training %s classifier...", name)
+        # XGBoost has no class_weight option, so it gets the same balanced weights as sample weights
         pipe, report, imp, preds, true = _evaluate_classifier(
-            name, estimator, X_train, y_cls, groups, le, numeric_features
+            name, estimator, X_train, y_cls, groups, le, numeric_features,
+            balanced_weights=(name == "XGBoost"),
         )
         joblib.dump(pipe, models_dir / f"clf_{name.lower()}.joblib")
         if name == "LightGBM":
@@ -425,7 +455,7 @@ def main(data_path: Path, stage: str):
     logger.info("\nClassification results (5-fold CV on training set):\n%s",
                 clf_df.to_string(index=False))
 
-    # ── Task 2: Blast Radius Regression ──────────────────────────────────────
+    # Task 2: Blast Radius Regression
     logger.info("\n%s\nTask 2: Blast Radius Regression\n%s", "="*55, "="*55)
 
     y_reg = df_train["blast_radius_final"].values.astype(float)
@@ -453,11 +483,22 @@ def main(data_path: Path, stage: str):
             metrics["rmse_mean"], metrics["rmse_std"],
         )
 
+    base_metrics = baseline_cv_regression(y_reg, early_blast_radius(df_train), groups)
+    reg_rows.append({"model": "EarlyBlastBaseline", **{k: round(v, 4) for k, v in base_metrics.items()}})
+    logger.info("  EarlyBlastBaseline (final = early) → MAE=%.3f±%.3f  RMSE=%.3f±%.3f",
+                base_metrics["mae_mean"], base_metrics["mae_std"],
+                base_metrics["rmse_mean"], base_metrics["rmse_std"])
+    zero_metrics = baseline_cv_regression(y_reg, no_spread_baseline(df_train), groups)
+    reg_rows.append({"model": "NoSpreadBaseline", **{k: round(v, 4) for k, v in zero_metrics.items()}})
+    logger.info("  NoSpreadBaseline (always 0)       → MAE=%.3f±%.3f  RMSE=%.3f±%.3f",
+                zero_metrics["mae_mean"], zero_metrics["mae_std"],
+                zero_metrics["rmse_mean"], zero_metrics["rmse_std"])
+
     reg_df = pd.DataFrame(reg_rows)
     reg_df.to_csv(results_dir / "regression_report.csv", index=False)
     logger.info("\nRegression results:\n%s", reg_df.to_string(index=False))
 
-    # ── Feature Importance ────────────────────────────────────────────────────
+    # Feature Importance
     logger.info("\n%s\nFeature Importance (Classification)\n%s", "="*55, "="*55)
 
     imp_records = []
@@ -472,7 +513,7 @@ def main(data_path: Path, stage: str):
         top10 = feat_imp_cls["RandomForest"].head(10)
         logger.info("\nTop 10 features (RandomForest classifier):\n%s", top10.to_string())
 
-    # ── Accuracy vs Time into Fault (OOF on training set) ────────────────────
+    # Accuracy vs Time into Fault (OOF on training set)
     logger.info("\n%s\nAccuracy vs Time-into-fault (LightGBM OOF)\n%s", "="*55, "="*55)
 
     t_rows = []

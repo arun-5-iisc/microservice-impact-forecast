@@ -1,0 +1,80 @@
+Runs: 244  settings: 224  repeated settings: 20  (training 15, holdout 5)
+Holdout runs: 50
+
+=== D. The 20 repeated settings ===
+Same severity label in both runs: 45% of rows (9/20 settings fully identical)
+Blast radius (final) differs between runs by 0.15 services on average (identical in 85% of rows)
+Fault-type mix (share of settings):
+            repeated settings  all settings
+fault_type                                 
+cpu                       45%           26%
+latency                   15%           46%
+memory                    40%           20%
+replicas                   0%            9%
+Severity mix:
+          repeated settings (rows)  all (rows)
+severity                                      
+Low                            45%         29%
+Medium                         22%          9%
+High                           32%         62%
+
+=== A. Pipeline-style evaluation per dataset version (same as run_pipeline.sh) ===
+    version   split  runs   acc  rule_acc  macro_f1  rule_macro_f1  medium_f1  changed_acc  t15_acc  rule_t15_acc   mae  base_mae
+       full      cv   194 0.841     0.660     0.664          0.423      0.244        0.652    0.820         0.701 0.248     0.316
+       full holdout    50 0.815     0.690     0.673          0.473      0.280        0.694    0.800         0.680 0.289     0.405
+ keep_first      cv   179 0.859     0.676     0.599          0.396      0.051        0.668    0.832         0.721 0.279     0.313
+ keep_first holdout    45 0.822     0.678     0.645          0.463      0.200        0.638    0.800         0.689 0.294     0.417
+keep_second      cv   179 0.830     0.684     0.631          0.418      0.246        0.588    0.793         0.704 0.280     0.321
+keep_second holdout    45 0.833     0.722     0.599          0.526      0.000        0.720    0.822         0.711 0.275     0.400
+(cv macro_f1 / mae are fold means like the pipeline; everything else is pooled)
+
+=== B. Holdout: every version's model scored on the same holdout rows ===
+ trained_on                scored_on   acc  rule_acc  macro_f1  rule_macro_f1  changed_acc  t15_acc   mae  base_mae
+       full              all 50 runs 0.815     0.690     0.673          0.473        0.694    0.800 0.289     0.405
+       full          first runs (45) 0.839     0.678     0.695          0.463        0.690    0.822 0.300     0.417
+       full         second runs (45) 0.822     0.722     0.592          0.526        0.720    0.800 0.270     0.400
+       full single-run settings (40) 0.850     0.713     0.600          0.520        0.717    0.825 0.281     0.412
+ keep_first              all 50 runs 0.800     0.690     0.625          0.473        0.645    0.780 0.285     0.405
+ keep_first          first runs (45) 0.822     0.678     0.645          0.463        0.638    0.800 0.294     0.417
+ keep_first         second runs (45) 0.822     0.722     0.583          0.526        0.720    0.800 0.266     0.400
+ keep_first single-run settings (40) 0.850     0.713     0.600          0.520        0.717    0.825 0.274     0.412
+keep_second              all 50 runs 0.825     0.690     0.684          0.473        0.694    0.820 0.288     0.405
+keep_second          first runs (45) 0.850     0.678     0.708          0.463        0.690    0.844 0.300     0.417
+keep_second         second runs (45) 0.833     0.722     0.599          0.526        0.720    0.822 0.275     0.400
+keep_second single-run settings (40) 0.863     0.713     0.605          0.520        0.717    0.850 0.287     0.412
+
+=== C. Repeated CV (10 shuffles), same folds for every version ===
+                                           acc       macro_f1      medium_f1    changed_acc        t15_acc            mae
+scored_on           version                                                                                              
+own rows            full         0.829 ± 0.006  0.636 ± 0.011  0.196 ± 0.023  0.618 ± 0.014  0.798 ± 0.012  0.262 ± 0.019
+single-run settings full         0.865 ± 0.006  0.652 ± 0.016  0.218 ± 0.041  0.621 ± 0.019  0.838 ± 0.010  0.284 ± 0.022
+own rows            keep_first   0.859 ± 0.008  0.633 ± 0.029  0.141 ± 0.081  0.660 ± 0.022  0.827 ± 0.013  0.277 ± 0.020
+single-run settings keep_first   0.867 ± 0.008  0.634 ± 0.030  0.157 ± 0.082  0.634 ± 0.023  0.835 ± 0.015  0.292 ± 0.023
+own rows            keep_second  0.832 ± 0.008  0.652 ± 0.024  0.270 ± 0.060  0.588 ± 0.024  0.798 ± 0.018  0.274 ± 0.021
+single-run settings keep_second  0.864 ± 0.010  0.674 ± 0.030  0.290 ± 0.079  0.623 ± 0.029  0.838 ± 0.018  0.282 ± 0.022
+(acc_w/macro_f1_w = XGB trained with class weights, like the saved model; see CSV)
+          scored_on     version  acc_w_mean  macro_f1_w_mean  rule_acc_mean  rule_macro_f1_mean  base_mae_mean
+           own rows        full       0.811            0.677          0.660               0.422          0.316
+single-run settings        full       0.848            0.694          0.704               0.407          0.319
+           own rows  keep_first       0.830            0.673          0.676               0.402          0.313
+single-run settings  keep_first       0.841            0.678          0.704               0.407          0.319
+           own rows keep_second       0.817            0.680          0.684               0.430          0.321
+single-run settings keep_second       0.844            0.689          0.704               0.407          0.319
+
+Paired difference per shuffle, scored on single-run settings (same rows for every version):
+ full minus      metric  mean_diff    sd full_better_in
+ keep_first         acc     -0.003 0.007           4/10
+ keep_first    macro_f1      0.018 0.023           9/10
+ keep_first       acc_w      0.007 0.009           9/10
+ keep_first  macro_f1_w      0.016 0.019           8/10
+ keep_first changed_acc     -0.012 0.019           3/10
+ keep_first     t15_acc      0.002 0.012           4/10
+ keep_first         mae     -0.008 0.007          10/10
+keep_second         acc      0.000 0.008           6/10
+keep_second    macro_f1     -0.022 0.023           2/10
+keep_second       acc_w      0.004 0.005           7/10
+keep_second  macro_f1_w      0.004 0.008           7/10
+keep_second changed_acc     -0.002 0.024           6/10
+keep_second     t15_acc     -0.001 0.013           4/10
+keep_second         mae      0.002 0.008           4/10
+Run-to-run noise (keep_first minus keep_second): acc +0.003 ± 0.007, macro-F1 -0.040 ± 0.023, MAE +0.010 ± 0.009

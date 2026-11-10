@@ -1,0 +1,13 @@
+model,time_into_fault_s,mae,rmse
+XGBoost,15,0.3389,0.5587
+EarlyBlastBaseline,15,0.58,0.8367
+NoSpreadBaseline,15,0.68,1.1136
+XGBoost,30,0.2861,0.4809
+EarlyBlastBaseline,30,0.44,0.6633
+NoSpreadBaseline,30,0.68,1.1136
+XGBoost,45,0.2545,0.4233
+EarlyBlastBaseline,45,0.32,0.5657
+NoSpreadBaseline,45,0.68,1.1136
+XGBoost,60,0.2755,0.4476
+EarlyBlastBaseline,60,0.28,0.5292
+NoSpreadBaseline,60,0.68,1.1136

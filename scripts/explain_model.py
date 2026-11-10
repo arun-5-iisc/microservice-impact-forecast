@@ -1,28 +1,20 @@
 """
 Model explainability: SHAP values and permutation importance.
 
-Loads a trained pipeline (.joblib), transforms the training data through the
-preprocessor, then computes SHAP values and permutation importance.
+Loads a trained pipeline (.joblib), passes the training runs through its preprocessor (the
+holdout in holdout_ids.txt is left out) and computes SHAP values, plus permutation importance
+for the classifier.
 
-Uses the 110-experiment training split (holdout_ids.txt excluded).
-
-Outputs (all in results/<stage>/plots/):
-  clf task:  shap_summary.png, shap_bar.png, shap_values.csv
+Outputs, in results/<stage>/plots/:
+  clf task:  shap_summary.png, shap_bar.png, shap_values.csv,
              permutation_importance.png, permutation_importance.csv
   reg task:  reg_shap_summary.png, reg_shap_bar.png, reg_shap_values.csv
 
-Usage:
-  # Classifier SHAP (XGBoost on base features):
-  python scripts/explain_model.py \\
-      --model models/fe_tuned/clf_xgb_tuned.joblib \\
-      --data  dataset/processed/training_dataset.csv \\
-      --task  clf
-
-  # Regressor SHAP (RandomForest on FE features):
-  python scripts/explain_model.py \\
-      --model models/fe_tuned/reg_rf_tuned.joblib \\
-      --data  dataset/processed/training_dataset_fe.csv \\
-      --task  reg
+Usage (stage 9 of run_pipeline.sh):
+  python scripts/explain_model.py --model models/baseline_clf_xgb/clf_xgb_tuned.joblib \\
+      --data dataset/processed/training_dataset.csv --stage baseline_clf_xgb --task clf
+  python scripts/explain_model.py --model models/fe_reg_xgb/reg_xgb_tuned.joblib \\
+      --data dataset/processed/training_dataset_fe.csv --stage fe_reg_xgb --task reg
 """
 import argparse
 import logging
@@ -32,7 +24,7 @@ import joblib
 import numpy as np
 import pandas as pd
 import matplotlib
-matplotlib.use("Agg")   # headless — no display required
+matplotlib.use("Agg")   # headless - no display required
 import matplotlib.pyplot as plt
 from sklearn.inspection import permutation_importance
 from sklearn.metrics import f1_score, make_scorer
@@ -46,6 +38,7 @@ from train_model import (
     FE_NUMERIC_FEATURES,
     CATEGORICAL_FEATURES,
     SEVERITY_ORDER,
+    setting_groups,
 )
 
 logging.basicConfig(
@@ -58,9 +51,7 @@ logger = logging.getLogger(__name__)
 REPO_ROOT = Path(__file__).parent.parent
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # SHAP
-# ─────────────────────────────────────────────────────────────────────────────
 
 def _shap_plots(pipe, X_transformed: np.ndarray, feature_names: list[str],
                 plots_dir: Path, model_name: str) -> None:
@@ -102,7 +93,7 @@ def _shap_plots(pipe, X_transformed: np.ndarray, feature_names: list[str],
     shap_df = pd.DataFrame(sv_primary, columns=feature_names)
     shap_df.to_csv(plots_dir / "shap_values.csv", index=False)
 
-    # ── Beeswarm summary plot ─────────────────────────────────────────────────
+    # Beeswarm summary plot
     fig, ax = plt.subplots(figsize=(9, 6))
     shap.summary_plot(sv_primary, X_transformed, feature_names=feature_names,
                       show=False, plot_size=None)
@@ -113,11 +104,21 @@ def _shap_plots(pipe, X_transformed: np.ndarray, feature_names: list[str],
     plt.close()
     logger.info("  Saved → %s", path)
 
-    # ── Bar plot (mean |SHAP|) ────────────────────────────────────────────────
+    # Bar plot (mean |SHAP|)
+    # Multiclass: one combined chart, all classes shown together as stacked
+    # per-class segments (not just the single "largest effect" class used
+    # above for the beeswarm) - shap's own multiclass support for plot_type="bar".
     fig, ax = plt.subplots(figsize=(9, 6))
-    shap.summary_plot(sv_primary, X_transformed, feature_names=feature_names,
-                      plot_type="bar", show=False, plot_size=None)
-    plt.title(f"SHAP Feature Importance — {model_name}  (mean |SHAP|)", fontsize=11)
+    if isinstance(shap_values, list):
+        shap.summary_plot(shap_values, X_transformed, feature_names=feature_names,
+                          plot_type="bar", class_names=SEVERITY_ORDER,
+                          show=False, plot_size=None)
+        plt.title(f"SHAP Feature Importance — {model_name}  (mean |SHAP|, all classes)",
+                  fontsize=11)
+    else:
+        shap.summary_plot(sv_primary, X_transformed, feature_names=feature_names,
+                          plot_type="bar", show=False, plot_size=None)
+        plt.title(f"SHAP Feature Importance — {model_name}  (mean |SHAP|)", fontsize=11)
     plt.tight_layout()
     path = plots_dir / "shap_bar.png"
     plt.savefig(path, dpi=150, bbox_inches="tight")
@@ -125,9 +126,7 @@ def _shap_plots(pipe, X_transformed: np.ndarray, feature_names: list[str],
     logger.info("  Saved → %s", path)
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # Regressor SHAP
-# ─────────────────────────────────────────────────────────────────────────────
 
 def _reg_shap_plots(pipe, X_transformed: np.ndarray, feature_names: list[str],
                     plots_dir: Path, model_name: str) -> None:
@@ -147,7 +146,7 @@ def _reg_shap_plots(pipe, X_transformed: np.ndarray, feature_names: list[str],
         logger.error("SHAP TreeExplainer failed: %s", exc)
         return
 
-    # Regression output is 2D (n_samples, n_features) — no class axis
+    # Regression output is 2D (n_samples, n_features) - no class axis
     plots_dir.mkdir(parents=True, exist_ok=True)
     pd.DataFrame(shap_values, columns=feature_names).to_csv(
         plots_dir / "reg_shap_values.csv", index=False
@@ -168,9 +167,7 @@ def _reg_shap_plots(pipe, X_transformed: np.ndarray, feature_names: list[str],
         logger.info("  Saved → %s", path)
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # Permutation Importance
-# ─────────────────────────────────────────────────────────────────────────────
 
 def _permutation_importance_plot(pipe, X: pd.DataFrame, y: np.ndarray,
                                  groups: np.ndarray, feature_names: list[str],
@@ -214,7 +211,7 @@ def _permutation_importance_plot(pipe, X: pd.DataFrame, y: np.ndarray,
     imp_df.to_csv(plots_dir / "permutation_importance.csv", index=False)
     logger.info("  Saved → %s", plots_dir / "permutation_importance.csv")
 
-    # ── Plot ─────────────────────────────────────────────────────────────────
+    # Plot
     top_n = min(20, len(imp_df))
     top   = imp_df.head(top_n)
 
@@ -232,9 +229,7 @@ def _permutation_importance_plot(pipe, X: pd.DataFrame, y: np.ndarray,
     logger.info("  Saved → %s", path)
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # Main
-# ─────────────────────────────────────────────────────────────────────────────
 
 def main(model_path: Path, data_path: Path, stage: str, task: str = "clf") -> None:
     plots_dir = REPO_ROOT / "results" / stage / "plots"
@@ -246,7 +241,7 @@ def main(model_path: Path, data_path: Path, stage: str, task: str = "clf") -> No
     logger.info("Loading dataset from %s", data_path)
     df = pd.read_csv(data_path)
 
-    # ── Exclude holdout experiments ───────────────────────────────────────────
+    # Exclude holdout experiments
     holdout_path = REPO_ROOT / "dataset" / "processed" / "holdout_ids.txt"
     if holdout_path.exists():
         holdout_ids = set(holdout_path.read_text().strip().splitlines())
@@ -260,9 +255,9 @@ def main(model_path: Path, data_path: Path, stage: str, task: str = "clf") -> No
     all_features     = numeric_features + CATEGORICAL_FEATURES
 
     X      = df[all_features]
-    groups = df["experiment_id"].values
+    groups = setting_groups(df)
 
-    # ── Build target and refit to get the preprocessor in fitted state ────────
+    # Build target and refit to get the preprocessor in fitted state
     if task == "reg":
         y = df["blast_radius_final"].values.astype(float)
     else:
@@ -283,10 +278,10 @@ def main(model_path: Path, data_path: Path, stage: str, task: str = "clf") -> No
     logger.info("Feature matrix: %d rows × %d features", *X_transformed.shape)
 
     if task == "reg":
-        # ── Regressor SHAP ───────────────────────────────────────────────────
+        # Regressor SHAP
         _reg_shap_plots(pipe, X_transformed, transformed_names, plots_dir, model_name)
     else:
-        # ── Classifier SHAP + permutation importance ──────────────────────────
+        # Classifier SHAP + permutation importance
         _shap_plots(pipe, X_transformed, transformed_names, plots_dir, model_name)
         _permutation_importance_plot(
             pipe, X, y, groups, all_features, plots_dir, model_name

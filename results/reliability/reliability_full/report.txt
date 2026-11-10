@@ -1,0 +1,51 @@
+Runs analysed: 244 of 244.  Reproduction check vs midterm_labels.csv: OK
+
+=== b) Bootstrap (200 resamples of each run's own traces): does the severity label survive? ===
+Stable severity (same label in ≥90% of resamples): 192/244 runs (79%)
+By label:
+          runs  stable  mean_stability
+severity                              
+Low         99    0.74            0.93
+Medium      21    0.05            0.55
+High       124    0.95            0.98
+By what decided the label:
+               runs  stable
+decided_by                 
+latency/error   118    0.56
+replicas=0       73    1.00
+restart          14    1.00
+untraced         39    1.00
+By fault type:
+            runs  stable  blast_sd  blast_same
+fault_type                                    
+cpu           67    0.70      0.80        0.43
+latency      105    0.91      0.73        0.49
+memory        52    0.56      0.86        0.43
+replicas      20    1.00      0.54        0.62
+Blast radius: bootstrap SD 0.76 services on average; the recorded value is reproduced in 47% of resamples
+
+=== c) No fault vs fault, both 30 s vs 30 s: blast radius counted ===
+            null                         signal                        
+fault_type   cpu latency memory replicas    cpu latency memory replicas
+def                                                                    
+mean >10%   2.25    2.60   3.19     2.80   2.07    2.58   2.77     1.70
+mean >25%   1.57    2.03   2.54     2.25   1.57    2.09   2.35     1.35
+mean >50%   1.04    1.37   1.62     1.75   1.13    1.59   1.75     0.90
+median >25% 1.33    1.53   1.46     1.75   1.25    1.33   1.87     1.60
+All runs:
+             null  signal  signal_minus_null
+def                                         
+mean >10%    2.65    2.41              -0.24
+mean >25%    2.03    1.94              -0.09
+mean >50%    1.36    1.44               0.08
+median >25%  1.48    1.45              -0.03
+
+Target latency delta (mean, 30 s windows): share of runs above the 20% / 100% thresholds
+            null >20%  signal >20%  null >100%  signal >100%
+fault_type                                                  
+cpu               39%          41%          9%           26%
+latency           35%          78%         11%           72%
+memory            48%          42%         18%           18%
+
+=== d) Repeat pairs: blast radius between the two runs' fault-free baselines (60 s vs 60 s) ===
+mean 1.85 services counted 'affected' with no fault in either window (current definition), over 20 pairs; values [0, 0, 0, 0, 0, 0, 0, 0, 1, 2, 2, 2, 3, 3, 3, 4, 4, 4, 4, 5]

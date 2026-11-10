@@ -1,0 +1,24 @@
+Structural exposure per changed service (services that call it, directly or indirectly):
+              service  exposure                                 exposed_services
+            adservice         1                                         frontend
+          cartservice         2                        checkoutservice, frontend
+      checkoutservice         1                                         frontend
+      currencyservice         2                        checkoutservice, frontend
+         emailservice         2                        checkoutservice, frontend
+             frontend         0                                                -
+       paymentservice         2                        checkoutservice, frontend
+productcatalogservice         3 checkoutservice, frontend, recommendationservice
+recommendationservice         1                                         frontend
+      shippingservice         2                        checkoutservice, frontend
+
+Graph-only baseline (predict every exposed service to be affected):
+   split  runs  graph_only_mae  graph_only_rmse  graph_only_r2  always_zero_mae  spread_within_exposure
+training   194          1.1031           1.4142        -1.7641           0.5258                  0.9948
+ holdout    50          1.0000           1.3416        -1.3148           0.6800                  0.9800
+
+Exposed services that were actually affected, by the changed service's severity:
+          runs  mean_exposure  mean_spread  exposed  affected  share_of_exposed_affected
+severity                                                                                
+Low         70          1.700        0.029      119         2                      0.017
+Medium      23          1.609        0.130       37         3                      0.081
+High       151          1.589        0.868      240       131                      0.546

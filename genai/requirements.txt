@@ -1,0 +1,9 @@
+# Dependencies, pinned to the versions
+# Install into the project venv on top of the main requirements:  venv/bin/pip install -r genai/requirements.txt
+anthropic==2.4.0
+mcp==2.3.0
+pydantic-ai-slim[anthropic,mcp,openai]==2.66.0
+openai==3.46.0          # OpenAI models (gpt-6-sol)
+fastmcp-slim==4.1.6
+chromadb==1.5.9
+onnxruntime==1.31.1

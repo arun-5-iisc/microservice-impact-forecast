@@ -1,13 +1,12 @@
 """
-Controls the loadgenerator traffic level for experiments.
+Sets the load generator's traffic level for an experiment.
 
-Uses kubectl set env to patch the running loadgenerator deployment.
-No Helm chart changes required — the patch takes effect on pod restart (~10s).
-Traffic is stabilised with a 20s sleep before the experiment baseline begins.
+Patches the loadgenerator deployment with kubectl set env (no Helm change); the pod restarts
+with the new values, and the script waits STABILISE_SECONDS before the baseline starts.
 
-Levels:
-  normal  USERS=10  RATE=1   ~10 req/s   (loadgenerator default)
-  high    USERS=25  RATE=1   ~25 req/s   (2.5× load)
+Levels (Locust users; RATE is how many users start per second, not requests per second):
+  normal  USERS=10  RATE=1   the loadgenerator default
+  high    USERS=25  RATE=1   2.5 times the users
 """
 import logging
 import subprocess
@@ -29,8 +28,8 @@ _DEFAULT_LEVEL = "normal"
 
 def set_traffic(level: str) -> None:
     """
-    Set the loadgenerator to the given traffic level and wait for it to stabilise.
-    No-op if the level is already 'normal' and the deployment is at its default values.
+    Set the traffic level and wait for it to settle. Setting the values the deployment already
+    has changes nothing on the cluster (no restart).
     """
     if level not in TRAFFIC_LEVELS:
         raise ValueError(f"Unknown traffic level {level!r}. Choose from: {list(TRAFFIC_LEVELS)}")

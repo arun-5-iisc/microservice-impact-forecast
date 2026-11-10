@@ -1,0 +1,123 @@
+service,fault,value,traffic,run,group,purpose
+recommendationservice,memory,220Mi,normal,2,rerun,Re-run of EXP_0247: its fault phase stretched to 222 s while the VM ran short of memory (see dataset/excluded/README.md)
+currencyservice,cpu,125m,normal,1,replication,"Repeat of EXP_0011 (failureforecast-1): Medium, in a consistent 100m/125m/150m = High/Medium/Low series"
+emailservice,memory,80Mi,normal,1,replication,Repeat of EXP_0166 (ff-1): Medium
+checkoutservice,latency,200,normal,1,replication,"Repeat of EXP_0058 (failureforecast-1): High, latency on the critical path"
+shippingservice,cpu,150m,normal,1,replication,"Repeat of EXP_0097 (failureforecast-1): Low, but blast radius 7"
+paymentservice,cpu,125m,normal,1,replication,"Repeat of EXP_0020 (failureforecast-1): High, although the tighter 100m gave Medium"
+paymentservice,memory,160Mi,normal,1,replication,"Repeat of EXP_0169 (ff-1): High, although 128Mi and 192Mi both gave Low"
+emailservice,latency,100,normal,1,replication,"Repeat of EXP_0180 (ff-1): Low, but blast radius 5"
+checkoutservice,cpu,100m,normal,1,replication,Second run on identical hardware (first: EXP_0009 or its re-run): Medium
+checkoutservice,cpu,125m,normal,1,replication,"Second run on identical hardware (first: EXP_0093 or its re-run): Low between two Mediums (100m, 150m)"
+checkoutservice,cpu,150m,normal,1,replication,Second run on identical hardware (first: EXP_0092 or its re-run): Medium although 125m gave Low
+paymentservice,cpu,100m,normal,1,replication,Second run on identical hardware (first: EXP_0096 or its re-run): Medium although 125m gave High
+productcatalogservice,cpu,100m,normal,1,replication,Second run on identical hardware (first: EXP_0006 or its re-run): Low although 125m/150m gave Medium
+productcatalogservice,cpu,150m,normal,1,replication,Second run on identical hardware (first: EXP_0091 or its re-run): Medium
+recommendationservice,latency,100,normal,1,replication,Second run on identical hardware (first: EXP_0065 or its re-run): Medium although 200ms/500ms gave Low
+checkoutservice,memory,64Mi,normal,1,replication,Second run on identical hardware (first: EXP_0039 or its re-run): Medium
+emailservice,memory,64Mi,normal,1,replication,Second run on identical hardware (first: EXP_0167 or its re-run): Medium
+emailservice,memory,100Mi,normal,1,replication,Second run on identical hardware (first: EXP_0165 or its re-run): High although 64Mi/80Mi gave Medium
+paymentservice,memory,128Mi,normal,1,replication,Second run on identical hardware (first: EXP_0170 or its re-run): Low although 160Mi gave High
+paymentservice,memory,192Mi,normal,1,replication,Second run on identical hardware (first: EXP_0168 or its re-run): Low although 160Mi gave High
+recommendationservice,memory,220Mi,normal,1,replication,Second run on identical hardware (first: EXP_0033 or its re-run): Medium
+checkoutservice,latency,25,normal,1,boundary,Boundary: critical path: already High at 100ms
+checkoutservice,latency,50,normal,1,boundary,Boundary: critical path: already High at 100ms
+currencyservice,latency,25,normal,1,boundary,Boundary: critical path: already High at 100ms
+currencyservice,latency,50,normal,1,boundary,Boundary: critical path: already High at 100ms
+frontend,latency,25,normal,1,boundary,Boundary: critical path: already High at 100ms
+frontend,latency,50,normal,1,boundary,Boundary: critical path: already High at 100ms
+productcatalogservice,latency,25,normal,1,boundary,Boundary: critical path: already High at 100ms
+productcatalogservice,latency,50,normal,1,boundary,Boundary: critical path: already High at 100ms
+adservice,latency,300,normal,1,boundary,"Boundary: Low at 200ms, High at 500ms"
+adservice,latency,400,normal,1,boundary,"Boundary: Low at 200ms, High at 500ms"
+cartservice,latency,300,normal,1,boundary,"Boundary: Low at 200ms, High at 500ms"
+cartservice,latency,400,normal,1,boundary,"Boundary: Low at 200ms, High at 500ms"
+emailservice,latency,300,normal,1,boundary,"Boundary: Low at 200ms, High at 500ms"
+emailservice,latency,400,normal,1,boundary,"Boundary: Low at 200ms, High at 500ms"
+shippingservice,latency,300,normal,1,boundary,"Boundary: Low at 200ms, High at 500ms"
+shippingservice,latency,400,normal,1,boundary,"Boundary: Low at 200ms, High at 500ms"
+recommendationservice,latency,750,normal,1,boundary,"Boundary: Low at 500ms, High at 1000ms"
+currencyservice,cpu,110m,normal,1,boundary,"Boundary: High at 100m, Medium at 125m"
+currencyservice,cpu,140m,normal,1,boundary,"Boundary: Medium at 125m, Low at 150m"
+emailservice,cpu,110m,normal,1,boundary,"Boundary: High at 100m, Low at 125m"
+recommendationservice,cpu,110m,normal,1,boundary,"Boundary: High at 100m, Low at 125m"
+checkoutservice,memory,72Mi,normal,1,boundary,"Boundary: Medium at 64Mi, Low at 80Mi"
+currencyservice,memory,144Mi,normal,1,boundary,"Boundary: Medium at 128Mi, Low at 160Mi"
+checkoutservice,memory,64Mi,high,1,high_traffic,High traffic: no memory fault has been run at high traffic (normal-traffic run EXP_0039)
+currencyservice,memory,128Mi,high,1,high_traffic,High traffic: no memory fault has been run at high traffic (normal-traffic run EXP_0164)
+emailservice,memory,80Mi,high,1,high_traffic,High traffic: no memory fault has been run at high traffic (normal-traffic run EXP_0166)
+paymentservice,memory,160Mi,high,1,high_traffic,High traffic: no memory fault has been run at high traffic (normal-traffic run EXP_0169)
+recommendationservice,memory,220Mi,high,1,high_traffic,High traffic: no memory fault has been run at high traffic (normal-traffic run EXP_0033)
+currencyservice,cpu,125m,high,1,high_traffic,High traffic: high-traffic version of a boundary CPU setting (normal-traffic run EXP_0011)
+emailservice,cpu,100m,high,1,high_traffic,High traffic: high-traffic version of a boundary CPU setting (normal-traffic run EXP_0135)
+paymentservice,cpu,125m,high,1,high_traffic,High traffic: high-traffic version of a boundary CPU setting (normal-traffic run EXP_0020)
+checkoutservice,latency,35,normal,1,boundary,"Finer latency step: critical path, already High at 100ms"
+checkoutservice,latency,75,normal,1,boundary,"Finer latency step: critical path, already High at 100ms"
+currencyservice,latency,35,normal,1,boundary,"Finer latency step: critical path, already High at 100ms"
+currencyservice,latency,75,normal,1,boundary,"Finer latency step: critical path, already High at 100ms"
+frontend,latency,35,normal,1,boundary,"Finer latency step: critical path, already High at 100ms"
+frontend,latency,75,normal,1,boundary,"Finer latency step: critical path, already High at 100ms"
+productcatalogservice,latency,35,normal,1,boundary,"Finer latency step: critical path, already High at 100ms"
+productcatalogservice,latency,75,normal,1,boundary,"Finer latency step: critical path, already High at 100ms"
+adservice,latency,250,normal,1,boundary,"Finer latency step: Low at 200ms, High at 500ms"
+adservice,latency,450,normal,1,boundary,"Finer latency step: Low at 200ms, High at 500ms"
+cartservice,latency,250,normal,1,boundary,"Finer latency step: Low at 200ms, High at 500ms"
+cartservice,latency,450,normal,1,boundary,"Finer latency step: Low at 200ms, High at 500ms"
+emailservice,latency,250,normal,1,boundary,"Finer latency step: Low at 200ms, High at 500ms"
+emailservice,latency,450,normal,1,boundary,"Finer latency step: Low at 200ms, High at 500ms"
+shippingservice,latency,250,normal,1,boundary,"Finer latency step: Low at 200ms, High at 500ms"
+shippingservice,latency,450,normal,1,boundary,"Finer latency step: Low at 200ms, High at 500ms"
+recommendationservice,latency,600,normal,1,boundary,"Finer latency step: Low at 500ms, High at 1000ms"
+recommendationservice,latency,900,normal,1,boundary,"Finer latency step: Low at 500ms, High at 1000ms"
+paymentservice,latency,150,normal,1,boundary,"Finer latency step: High at 100ms, Low at 200ms"
+adservice,cpu,200m,high,1,high_traffic,High-traffic coverage for every service: CPU at its request (tightest allowed)
+adservice,cpu,250m,high,1,high_traffic,High-traffic coverage for every service: CPU midway to the default limit
+adservice,memory,180Mi,high,1,high_traffic,High-traffic coverage for every service: memory at its request (tightest allowed)
+adservice,latency,100,high,1,high_traffic,High-traffic coverage for every service: 100ms delay
+adservice,latency,500,high,1,high_traffic,High-traffic coverage for every service: 500ms delay
+adservice,replicas,0,high,1,high_traffic,High-traffic coverage for every service: service switched off
+cartservice,cpu,200m,high,1,high_traffic,High-traffic coverage for every service: CPU at its request (tightest allowed)
+cartservice,cpu,250m,high,1,high_traffic,High-traffic coverage for every service: CPU midway to the default limit
+cartservice,memory,128Mi,high,1,high_traffic,High-traffic coverage for every service: memory at its request (tightest allowed)
+cartservice,latency,100,high,1,high_traffic,High-traffic coverage for every service: 100ms delay
+cartservice,latency,500,high,1,high_traffic,High-traffic coverage for every service: 500ms delay
+cartservice,replicas,0,high,1,high_traffic,High-traffic coverage for every service: service switched off
+checkoutservice,cpu,150m,high,1,high_traffic,High-traffic coverage for every service: CPU midway to the default limit
+checkoutservice,latency,100,high,1,high_traffic,High-traffic coverage for every service: 100ms delay
+currencyservice,cpu,100m,high,1,high_traffic,High-traffic coverage for every service: CPU at its request (tightest allowed)
+currencyservice,cpu,150m,high,1,high_traffic,High-traffic coverage for every service: CPU midway to the default limit
+currencyservice,latency,100,high,1,high_traffic,High-traffic coverage for every service: 100ms delay
+currencyservice,replicas,0,high,1,high_traffic,High-traffic coverage for every service: service switched off
+emailservice,cpu,150m,high,1,high_traffic,High-traffic coverage for every service: CPU midway to the default limit
+emailservice,memory,64Mi,high,1,high_traffic,High-traffic coverage for every service: memory at its request (tightest allowed)
+emailservice,latency,100,high,1,high_traffic,High-traffic coverage for every service: 100ms delay
+emailservice,latency,500,high,1,high_traffic,High-traffic coverage for every service: 500ms delay
+emailservice,replicas,0,high,1,high_traffic,High-traffic coverage for every service: service switched off
+frontend,cpu,150m,high,1,high_traffic,High-traffic coverage for every service: CPU midway to the default limit
+frontend,memory,64Mi,high,1,high_traffic,High-traffic coverage for every service: memory at its request (tightest allowed)
+frontend,latency,100,high,1,high_traffic,High-traffic coverage for every service: 100ms delay
+frontend,replicas,0,high,1,high_traffic,High-traffic coverage for every service: service switched off
+paymentservice,cpu,100m,high,1,high_traffic,High-traffic coverage for every service: CPU at its request (tightest allowed)
+paymentservice,cpu,150m,high,1,high_traffic,High-traffic coverage for every service: CPU midway to the default limit
+paymentservice,memory,128Mi,high,1,high_traffic,High-traffic coverage for every service: memory at its request (tightest allowed)
+paymentservice,latency,100,high,1,high_traffic,High-traffic coverage for every service: 100ms delay
+paymentservice,replicas,0,high,1,high_traffic,High-traffic coverage for every service: service switched off
+productcatalogservice,cpu,100m,high,1,high_traffic,High-traffic coverage for every service: CPU at its request (tightest allowed)
+productcatalogservice,cpu,150m,high,1,high_traffic,High-traffic coverage for every service: CPU midway to the default limit
+productcatalogservice,memory,64Mi,high,1,high_traffic,High-traffic coverage for every service: memory at its request (tightest allowed)
+productcatalogservice,latency,100,high,1,high_traffic,High-traffic coverage for every service: 100ms delay
+recommendationservice,cpu,150m,high,1,high_traffic,High-traffic coverage for every service: CPU midway to the default limit
+recommendationservice,latency,100,high,1,high_traffic,High-traffic coverage for every service: 100ms delay
+recommendationservice,latency,500,high,1,high_traffic,High-traffic coverage for every service: 500ms delay
+shippingservice,cpu,100m,high,1,high_traffic,High-traffic coverage for every service: CPU at its request (tightest allowed)
+shippingservice,cpu,150m,high,1,high_traffic,High-traffic coverage for every service: CPU midway to the default limit
+shippingservice,memory,64Mi,high,1,high_traffic,High-traffic coverage for every service: memory at its request (tightest allowed)
+shippingservice,latency,100,high,1,high_traffic,High-traffic coverage for every service: 100ms delay
+shippingservice,replicas,0,high,1,high_traffic,High-traffic coverage for every service: service switched off
+checkoutservice,latency,1000,normal,2,rerun,Re-run of EXP_0273: a 56-min stall made the trace download hit its limit and drop the baseline (see dataset/excluded/README.md)
+productcatalogservice,latency,1000,normal,2,rerun,Re-run of EXP_0285: a 56-min stall made the trace download hit its limit and drop part of the baseline (see dataset/excluded/README.md)
+emailservice,latency,200,normal,2,rerun,Re-run of EXP_0181: no baseline traces for any service (see dataset/excluded/README.md)
+emailservice,latency,500,normal,2,rerun,Re-run of EXP_0182: trace download hit its limit after a 3.2 h stall (see dataset/excluded/README.md)
+emailservice,latency,1000,normal,2,rerun,Re-run of EXP_0184: no traces for the faulted service (see dataset/excluded/README.md)
+paymentservice,latency,1000,high,2,rerun,Re-run of EXP_0190: no baseline traces for any service (see dataset/excluded/README.md)
+adservice,replicas,0,normal,2,rerun,Re-run of EXP_0195: baseline traces only partly recorded (see dataset/excluded/README.md)

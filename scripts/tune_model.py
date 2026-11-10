@@ -1,41 +1,15 @@
 """
-Hyperparameter tuning for proactive deployment impact forecasting models.
+Optuna tuning of the severity classifier or the blast-radius regressor (random forest, XGBoost or LightGBM).
 
-Tunes RandomForest, XGBoost, and LightGBM on both tasks using Optuna (Bayesian
-search) with GroupKFold to prevent label leakage across the 4 T-snapshots per
-experiment.
+Cross-validation is GroupKFold grouped by experiment setting, so a run's 4 snapshots and the repeats of a
+setting never land on both sides of a split. Objective: macro-F1 for severity, MAE for blast radius. The best
+model is then refitted, compared with the no-ML baselines and the untuned models, and scored once on the
+holdout. Outputs go to models/<stage>/ and results/<stage>/.
 
-Optimises:
-  Classification — macro-F1 (maximise)
-  Regression     — MAE (minimise)
-
-Experimental flow (two-stage isolation design):
-  Stage 1: --data training_dataset.csv    --stage baseline_tuned
-           Tune all models on original features → pick best algorithm
-  Stage 2: --data training_dataset_fe.csv --stage fe_tuned   --model <winner>
-           Tune winner on FE features → isolates FE contribution
-
-After tuning, runs a full OOF evaluation (accuracy, per-class F1, MAE, RMSE)
-and writes the comparison table to results/<stage>/final_results.csv.
-
-Outputs (all under results/<stage>/ and models/<stage>/):
-  models/<stage>/   — clf_rf_tuned.joblib, clf_xgb_tuned.joblib, clf_lgbm_tuned.joblib
-                       reg_rf_tuned.joblib, reg_xgb_tuned.joblib, reg_lgbm_tuned.joblib
-  results/<stage>/  — best_params.json, tuning_report.csv,
-                       final_results.csv, accuracy_vs_time_tuned.csv
-
-Usage:
-  # Stage 1: tune all models on baseline dataset
-  python scripts/tune_model.py --data dataset/processed/training_dataset.csv --stage baseline_tuned
-
-  # Stage 2: tune winner on FE dataset
-  python scripts/tune_model.py --data dataset/processed/training_dataset_fe.csv --stage fe_tuned --model lgbm
-
-  # Re-run evaluation only (load saved best_params.json)
-  python scripts/tune_model.py --stage baseline_tuned --eval-only
-
-  # Explicit trial count
-  python scripts/tune_model.py --stage baseline_tuned --trials 100
+Usage (stage 7 of run_pipeline.sh):
+  python scripts/tune_model.py --data dataset/processed/training_dataset.csv --task clf --clf-model xgb --stage baseline_clf_xgb
+  python scripts/tune_model.py --data dataset/processed/training_dataset_fe.csv --task reg --reg-model rf --stage fe_reg_rf
+  (add --eval-only to evaluate again with the saved best_params.json)
 """
 import argparse
 import json
@@ -55,6 +29,7 @@ from sklearn.metrics import (
     classification_report,
     f1_score,
     mean_absolute_error,
+    mean_squared_error,
     r2_score,
 )
 from sklearn.model_selection import GroupKFold
@@ -73,6 +48,12 @@ from train_model import (
     BASE_NUMERIC_FEATURES,
     FE_NUMERIC_FEATURES,
     SEVERITY_ORDER,
+    baseline_cv_regression,
+    baseline_cv_report,
+    early_blast_radius,
+    full_rule_severity,
+    no_spread_baseline,
+    setting_groups,
 )
 
 warnings.filterwarnings("ignore", category=UserWarning)
@@ -94,9 +75,7 @@ N_FOLDS   = 5
 N_TRIALS  = 50
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # Optuna objectives
-# ─────────────────────────────────────────────────────────────────────────────
 
 def _rf_clf_objective(trial, X, y, groups, numeric_features):
     params = {
@@ -233,9 +212,7 @@ def _xgb_reg_objective(trial, X, y, groups, numeric_features):
     return np.mean(scores)
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # Generic tune + refit helper
-# ─────────────────────────────────────────────────────────────────────────────
 
 def _tune(name: str, objective_fn, direction: str, n_trials: int,
           X, y, groups, numeric_features):
@@ -277,7 +254,7 @@ def _log_callback(name, direction):
 def _save_study_plots(study: optuna.Study, name: str, plots_dir: Path) -> None:
     """Save optimization history and hyperparameter importance plots as PNG.
 
-    Uses optuna.visualization.matplotlib — no kaleido or browser required.
+    Uses optuna.visualization.matplotlib - no kaleido or browser required.
     """
     try:
         import matplotlib
@@ -335,22 +312,48 @@ def _refit_and_save(estimator_cls, best_params, X, y, numeric_features, path,
     return pipe
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # Full OOF evaluation for tuned models
-# ─────────────────────────────────────────────────────────────────────────────
 
 PRIOR_COLS = ["stage", "model", "accuracy", "macro_f1", "Low_f1",
               "Medium_f1", "High_f1", "blast_mae", "blast_rmse"]
 
-# Fallback numbers used only when Stage 0 / Stage 1 CSVs are absent.
-# These will be replaced by actual CSV results at runtime once those stages run.
-def _load_prior_results() -> list[tuple]:
-    """Load Stage 0 and Stage 1 results from CSV files.
+def _clf_comparison_row(split: str, model: str, report: dict, accuracy: float) -> dict:
+    row = {"split": split, "task": "severity", "model": model,
+           "accuracy": round(accuracy, 4), "macro_f1": round(report["macro avg"]["f1-score"], 4)}
+    for cls in SEVERITY_ORDER:
+        row[f"{cls}_f1"] = round(report[cls]["f1-score"], 4)
+    return row
 
-    Reads results/<stage>/classification_report.csv and regression_report.csv
-    for both 'baseline' and 'fe' stages. Raises RuntimeError if either stage's
-    CSVs are missing — run train_model.py --stage baseline and --stage fe first.
+
+def _reg_comparison_row(split: str, model: str, mae: float, rmse: float, r2: float = np.nan) -> dict:
+    return {"split": split, "task": "blast_radius", "model": model,
+            "mae": round(mae, 4), "rmse": round(rmse, 4), "r2": round(r2, 4)}
+
+
+def _forecasting_gain(split: str, true_lbl, model_lbl, base_lbl, exp_ids) -> list:
     """
+    Accuracy split by whether the severity changes after the snapshot. Where it
+    changes, the full-rule baseline is wrong by definition, so a model's accuracy
+    on those rows is where forecasting beats reactive alerting.
+    """
+    changed = base_lbl != true_lbl
+    rows = []
+    for subset, mask in (("all", np.ones(len(true_lbl), dtype=bool)),
+                         ("changed_after_snapshot", changed), ("unchanged", ~changed)):
+        if mask.sum() == 0:
+            continue
+        rows.append({
+            "split": split, "subset": subset, "rows": int(mask.sum()),
+            "experiments": len(set(exp_ids[mask])),
+            "model_accuracy":    round(float((model_lbl[mask] == true_lbl[mask]).mean()), 4),
+            "baseline_accuracy": round(float((base_lbl[mask] == true_lbl[mask]).mean()), 4),
+        })
+    return rows
+
+
+def _load_prior_results() -> list[tuple]:
+    """Results of the untuned models (train_model.py stages 'baseline' and 'fe'), to show the gain
+    from tuning. Raises RuntimeError if they haven't been run yet."""
     rows = []
     missing = []
     for stage_key in ("baseline", "fe"):
@@ -388,13 +391,11 @@ def _load_prior_results() -> list[tuple]:
             "Run train_model.py --stage baseline and --stage fe before tuning."
         )
 
-    logger.info("Loaded %d prior result rows from Stage 0/1 CSVs", len(rows))
+    logger.info("Loaded %d result rows of the untuned models", len(rows))
     return rows
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # Per-model dispatch tables and param finalisation
-# ─────────────────────────────────────────────────────────────────────────────
 
 _CLF_CLS = {"rf": RandomForestClassifier, "xgb": XGBClassifier, "lgbm": LGBMClassifier}
 _REG_CLS = {"rf": RandomForestRegressor,  "xgb": XGBRegressor,  "lgbm": LGBMRegressor}
@@ -434,9 +435,31 @@ def _get_clf_fit_params(model: str, y_cls: np.ndarray) -> dict | None:
     return None
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Main — two independent pipelines: best clf model + best reg model
-# ─────────────────────────────────────────────────────────────────────────────
+def _oof_regression_by_time(estimator, X, y, groups, t_values, numeric_features):
+    """
+    Out-of-fold MAE/RMSE of the tuned regressor per snapshot time. train_model._evaluate_regressor()
+    only returns fold means, not row-level predictions, so this reruns the same 5-fold split.
+    """
+    pipe = Pipeline([("pre", _build_preprocessor(numeric_features)), ("model", estimator)])
+    gkf  = GroupKFold(n_splits=N_FOLDS)
+
+    oof_preds = np.empty(len(y))
+    for train_idx, test_idx in gkf.split(X, y, groups):
+        pipe.fit(X.iloc[train_idx], y[train_idx])
+        oof_preds[test_idx] = pipe.predict(X.iloc[test_idx])
+
+    rows = []
+    for T in [15, 30, 45, 60]:
+        mask = t_values == T
+        if mask.sum() == 0:
+            continue
+        mae  = mean_absolute_error(y[mask], oof_preds[mask])
+        rmse = np.sqrt(mean_squared_error(y[mask], oof_preds[mask]))
+        rows.append({"time_into_fault_s": T, "mae": round(mae, 4), "rmse": round(rmse, 4)})
+    return rows
+
+
+# Main: tunes the classifier and/or the regressor, each on its own
 
 def main(data_path: Path, stage: str, clf_model: str, reg_model: str,
          n_trials: int, eval_only: bool = False, task: str = "both"):
@@ -447,12 +470,13 @@ def main(data_path: Path, stage: str, clf_model: str, reg_model: str,
     results_dir.mkdir(parents=True, exist_ok=True)
 
     logger.info("Loading dataset from %s  [stage=%s]", data_path, stage)
-    logger.info("Classification winner: %s  |  Regression winner: %s",
-                _LABELS[clf_model], _LABELS[reg_model])
+    logger.info("Tuning: %s", ", ".join(
+        ([f"classifier {_LABELS[clf_model]}"] if task in ("both", "clf") else [])
+        + ([f"regressor {_LABELS[reg_model]}"] if task in ("both", "reg") else [])))
     df = pd.read_csv(data_path)
     logger.info("Dataset: %d rows, %d experiments", len(df), df["experiment_id"].nunique())
 
-    # ── Train / holdout split ─────────────────────────────────────────────────
+    # Train / holdout split
     holdout_path = REPO_ROOT / "dataset" / "processed" / "holdout_ids.txt"
     if holdout_path.exists():
         holdout_ids = set(holdout_path.read_text().strip().splitlines())
@@ -474,7 +498,7 @@ def main(data_path: Path, stage: str, clf_model: str, reg_model: str,
     logger.info("Feature set: %d numeric + %d categorical", len(numeric_features), len(CATEGORICAL_FEATURES))
 
     X      = df_train[all_features]
-    groups = df_train["experiment_id"].values
+    groups = setting_groups(df_train)
 
     le = LabelEncoder()
     le.classes_ = np.array(SEVERITY_ORDER)
@@ -484,7 +508,7 @@ def main(data_path: Path, stage: str, clf_model: str, reg_model: str,
     best_params_all = {}
     report_rows     = []
 
-    # Stage-aware prior results: compare tuning gain against the matching default-param stage
+    # untuned results of the same feature set, to report the gain from tuning
     prior_stage  = "baseline" if "baseline" in stage else "fe"
     all_prior    = _load_prior_results()
     prior_lookup = {
@@ -493,7 +517,7 @@ def main(data_path: Path, stage: str, clf_model: str, reg_model: str,
         if row[0] == prior_stage
     }
 
-    # ── Load existing params if eval-only ────────────────────────────────────
+    # Load existing params if eval-only
     params_path = results_dir / "best_params.json"
     if eval_only:
         if not params_path.exists():
@@ -503,7 +527,7 @@ def main(data_path: Path, stage: str, clf_model: str, reg_model: str,
             best_params_all = json.load(f)
         logger.info("Loaded best params from %s", params_path)
 
-    # ── Classification pipeline: tune clf_model ───────────────────────────────
+    # Classification pipeline: tune clf_model
     clf_key = f"{clf_model}_clf"
     if task in ("both", "clf"):
         logger.info("\n%s\nClassification Pipeline — tuning %s\n%s",
@@ -532,7 +556,7 @@ def main(data_path: Path, stage: str, clf_model: str, reg_model: str,
         logger.info("  %s clf → baseline=%.4f  tuned=%.4f  Δ=+%.1f%%",
                     _LABELS[clf_model], base, val, 100 * (val - base) / max(base, 1e-9))
 
-    # ── Regression pipeline: tune reg_model ───────────────────────────────────
+    # Regression pipeline: tune reg_model
     reg_key = f"{reg_model}_reg"
     if task in ("both", "reg"):
         logger.info("\n%s\nRegression Pipeline — tuning %s\n%s",
@@ -560,19 +584,21 @@ def main(data_path: Path, stage: str, clf_model: str, reg_model: str,
         logger.info("  %s reg → baseline=%.4f  tuned=%.4f  Δ=-%.1f%%",
                     _LABELS[reg_model], base, val, 100 * (base - val) / max(base, 1e-9))
 
-    # ── Save tuning report ────────────────────────────────────────────────────
+    # Save tuning report
     if not eval_only:
         with open(params_path, "w") as f:
             json.dump(best_params_all, f, indent=2)
         pd.DataFrame(report_rows).to_csv(results_dir / "tuning_report.csv", index=False)
         logger.info("Best params → %s", params_path)
 
-    # ── Full OOF evaluation ───────────────────────────────────────────────────
+    # Full OOF evaluation
     logger.info("\n%s\nFull OOF Evaluation\n%s", "="*55, "="*55)
 
     final_rows  = list(all_prior)
     all_t_rows  = []
     oof_records = []
+    comparison_rows = []   # model vs no-ML baselines -> baseline_comparison.csv
+    gain_rows       = []   # accuracy where severity changes after the snapshot -> forecasting_gain.csv
     t_values    = df_train["time_into_fault_s"].values
 
     # Classification: evaluate tuned clf_model
@@ -582,25 +608,48 @@ def main(data_path: Path, stage: str, clf_model: str, reg_model: str,
             _LABELS[clf_model],
             _CLF_CLS[clf_model](**best_params_all[clf_key]),
             X, y_cls, groups, le, numeric_features,
+            # same class weighting as the tuning objective and the saved model (XGBoost)
+            balanced_weights=_get_clf_fit_params(clf_model, y_cls) is not None,
         )
+        true_lbl  = le.classes_[oof_true]
+        model_lbl = le.classes_[oof_preds]
+        base_lbl  = full_rule_severity(df_train)
+        assert (true_lbl == df_train["severity"].values).all(), "OOF rows out of order"
+        base_report = baseline_cv_report(true_lbl, base_lbl, groups)
         for T in [15, 30, 45, 60]:
             mask = t_values == T
             if mask.sum() == 0:
                 continue
             acc = accuracy_score(oof_true[mask], oof_preds[mask])
             f1  = f1_score(oof_true[mask], oof_preds[mask], average="macro", zero_division=0)
-            all_t_rows.append({
-                "model": _LABELS[clf_model], "time_into_fault_s": T,
-                "accuracy": round(acc, 4), "macro_f1": round(f1, 4),
-            })
-            logger.info("    T=%2ds → accuracy=%.3f  macro-F1=%.3f", T, acc, f1)
-        for pred, true in zip(oof_preds, oof_true):
+            b_acc = accuracy_score(true_lbl[mask], base_lbl[mask])
+            b_f1  = f1_score(true_lbl[mask], base_lbl[mask], average="macro", zero_division=0)
+            all_t_rows += [
+                {"model": _LABELS[clf_model], "time_into_fault_s": T,
+                 "accuracy": round(acc, 4), "macro_f1": round(f1, 4)},
+                {"model": "FullRuleBaseline", "time_into_fault_s": T,
+                 "accuracy": round(b_acc, 4), "macro_f1": round(b_f1, 4)},
+            ]
+            logger.info("    T=%2ds → accuracy=%.3f  macro-F1=%.3f   (full-rule baseline %.3f / %.3f)",
+                        T, acc, f1, b_acc, b_f1)
+        for i, (pred, true) in enumerate(zip(oof_preds, oof_true)):
             oof_records.append({
-                "model":      _LABELS[clf_model],
-                "true_label": le.classes_[true],
-                "pred_label": le.classes_[pred],
+                "model":             _LABELS[clf_model],
+                "true_label":        le.classes_[true],
+                "pred_label":        le.classes_[pred],
+                "baseline_pred":     base_lbl[i],
+                "experiment_id":     df_train["experiment_id"].iat[i],
+                "time_into_fault_s": int(t_values[i]),
             })
-        # Stage 2 clf row: reg metrics are NaN (not this model's task)
+        comparison_rows += [
+            _clf_comparison_row("cv", _LABELS[clf_model], clf_report, clf_report["accuracy"]),
+            _clf_comparison_row("cv", "FullRuleBaseline", base_report, base_report["accuracy"]),
+        ]
+        gain_rows += _forecasting_gain("cv", true_lbl, model_lbl, base_lbl,
+                                       df_train["experiment_id"].values)
+        logger.info("  FullRuleBaseline (cv) → accuracy=%.3f  macro-F1=%.3f",
+                    base_report["accuracy"], base_report["macro avg"]["f1-score"])
+        # classifier row: the blast-radius columns stay NaN
         final_rows.append((
             stage, _LABELS[clf_model],
             round(clf_report["accuracy"], 4),
@@ -619,6 +668,7 @@ def main(data_path: Path, stage: str, clf_model: str, reg_model: str,
         )
 
     # Regression: evaluate tuned reg_model
+    mae_t_rows = []
     if reg_key in best_params_all:
         logger.info("  OOF eval — %s regressor (tuned)…", _LABELS[reg_model])
         _, reg_metrics, _ = _evaluate_regressor(
@@ -626,7 +676,7 @@ def main(data_path: Path, stage: str, clf_model: str, reg_model: str,
             _REG_CLS[reg_model](**best_params_all[reg_key]),
             X, y_reg, groups, numeric_features,
         )
-        # Stage 2 reg row: clf metrics are NaN (not this model's task)
+        # regressor row: the severity columns stay NaN
         final_rows.append((
             stage, _LABELS[reg_model],
             np.nan, np.nan, np.nan, np.nan, np.nan,
@@ -637,11 +687,44 @@ def main(data_path: Path, stage: str, clf_model: str, reg_model: str,
                     _LABELS[reg_model],
                     reg_metrics["mae_mean"],  reg_metrics["mae_std"],
                     reg_metrics["rmse_mean"], reg_metrics["rmse_std"])
+        early = early_blast_radius(df_train)
+        zero = no_spread_baseline(df_train)
+        base_reg = baseline_cv_regression(y_reg, early, groups)
+        zero_reg = baseline_cv_regression(y_reg, zero, groups)
+        comparison_rows += [
+            _reg_comparison_row("cv", _LABELS[reg_model], reg_metrics["mae_mean"], reg_metrics["rmse_mean"]),
+            _reg_comparison_row("cv", "EarlyBlastBaseline", base_reg["mae_mean"], base_reg["rmse_mean"]),
+            _reg_comparison_row("cv", "NoSpreadBaseline", zero_reg["mae_mean"], zero_reg["rmse_mean"]),
+        ]
+        logger.info("  EarlyBlastBaseline (cv) → MAE=%.4f  RMSE=%.4f", base_reg["mae_mean"], base_reg["rmse_mean"])
+        logger.info("  NoSpreadBaseline   (cv) → MAE=%.4f  RMSE=%.4f", zero_reg["mae_mean"], zero_reg["rmse_mean"])
+        for T in [15, 30, 45, 60]:
+            mask = t_values == T
+            if mask.sum():
+                for name, pred in (("EarlyBlastBaseline", early), ("NoSpreadBaseline", zero)):
+                    mae_t_rows.append({
+                        "model": name, "time_into_fault_s": T,
+                        "mae":  round(mean_absolute_error(y_reg[mask], pred[mask]), 4),
+                        "rmse": round(float(np.sqrt(np.mean((y_reg[mask] - pred[mask]) ** 2))), 4),
+                    })
 
-    # ── Save results ──────────────────────────────────────────────────────────
+        logger.info("  OOF eval by time-into-fault — %s regressor (tuned)…", _LABELS[reg_model])
+        for row in _oof_regression_by_time(
+            _REG_CLS[reg_model](**best_params_all[reg_key]),
+            X, y_reg, groups, t_values, numeric_features,
+        ):
+            row["model"] = _LABELS[reg_model]
+            mae_t_rows.append(row)
+            logger.info("    T=%2ds → MAE=%.3f  RMSE=%.3f",
+                        row["time_into_fault_s"], row["mae"], row["rmse"])
+
+    # Save results
     final_df = pd.DataFrame(final_rows, columns=PRIOR_COLS)
     final_df.to_csv(results_dir / "final_results.csv", index=False)
     logger.info("\nFull three-stage comparison:\n%s", final_df.to_string(index=False))
+
+    if mae_t_rows:
+        pd.DataFrame(mae_t_rows).to_csv(results_dir / "mae_vs_time_tuned.csv", index=False)
 
     if all_t_rows:
         pd.DataFrame(all_t_rows).to_csv(results_dir / "accuracy_vs_time_tuned.csv", index=False)
@@ -650,7 +733,7 @@ def main(data_path: Path, stage: str, clf_model: str, reg_model: str,
         pd.DataFrame(oof_records).to_csv(results_dir / "oof_predictions.csv", index=False)
         logger.info("OOF predictions → %s", results_dir / "oof_predictions.csv")
 
-    # ── Final holdout evaluation (20 unseen experiments) ─────────────────────
+    # Holdout: scored once, after tuning
     if df_test is not None and len(df_test) > 0:
         logger.info("\n%s\nFinal Holdout Evaluation (%d unseen experiments)\n%s",
                     "="*55, df_test["experiment_id"].nunique(), "="*55)
@@ -672,15 +755,37 @@ def main(data_path: Path, stage: str, clf_model: str, reg_model: str,
                 zero_division=0,
             )
             acc = accuracy_score(y_cls_test, y_pred)
-            h_row = {"model": _LABELS[clf_model], "accuracy": round(acc, 4),
-                     "macro_f1": round(report["macro avg"]["f1-score"], 4)}
-            for cls in SEVERITY_ORDER:
-                h_row[f"{cls}_f1"] = round(report[cls]["f1-score"], 4)
-            pd.DataFrame([h_row]).to_csv(results_dir / "holdout_report.csv", index=False)
+            true_test = le.inverse_transform(y_cls_test)
+            pred_test = le.inverse_transform(y_pred.astype(int))
+            base_test = full_rule_severity(df_test)
+            base_rep  = classification_report(true_test, base_test, labels=SEVERITY_ORDER,
+                                              target_names=SEVERITY_ORDER, output_dict=True,
+                                              zero_division=0)
+            base_acc  = accuracy_score(true_test, base_test)
+            h_rows = []
+            for name, rep, a in ((_LABELS[clf_model], report, acc), ("FullRuleBaseline", base_rep, base_acc)):
+                row = {"model": name, "accuracy": round(a, 4), "macro_f1": round(rep["macro avg"]["f1-score"], 4)}
+                for cls in SEVERITY_ORDER:
+                    row[f"{cls}_f1"] = round(rep[cls]["f1-score"], 4)
+                h_rows.append(row)
+            # the model stays on the first row - visualize.py reads row 0
+            pd.DataFrame(h_rows).to_csv(results_dir / "holdout_report.csv", index=False)
+            comparison_rows += [
+                _clf_comparison_row("holdout", _LABELS[clf_model], report, acc),
+                _clf_comparison_row("holdout", "FullRuleBaseline", base_rep, base_acc),
+            ]
+            gain_rows += _forecasting_gain("holdout", true_test, pred_test, base_test,
+                                           df_test["experiment_id"].values)
+            logger.info("  FullRuleBaseline holdout → accuracy=%.3f  macro-F1=%.3f",
+                        base_acc, base_rep["macro avg"]["f1-score"])
+            t_test = df_test["time_into_fault_s"].values
             pd.DataFrame({
-                "model":      _LABELS[clf_model],
-                "true_label": le.inverse_transform(y_cls_test),
-                "pred_label": le.inverse_transform(y_pred.astype(int)),
+                "model":             _LABELS[clf_model],
+                "true_label":        true_test,
+                "pred_label":        pred_test,
+                "baseline_pred":     base_test,
+                "experiment_id":     df_test["experiment_id"].values,
+                "time_into_fault_s": t_test,
             }).to_csv(results_dir / "holdout_predictions.csv", index=False)
             logger.info(
                 "  %s clf holdout → accuracy=%.3f  macro-F1=%.3f  "
@@ -691,6 +796,26 @@ def main(data_path: Path, stage: str, clf_model: str, reg_model: str,
                 report["High"]["f1-score"],
             )
 
+            t_rows = []
+            for T in [15, 30, 45, 60]:
+                mask = t_test == T
+                if mask.sum() == 0:
+                    continue
+                t_acc = accuracy_score(y_cls_test[mask], y_pred[mask])
+                t_f1  = f1_score(y_cls_test[mask], y_pred[mask], average="macro", zero_division=0)
+                b_acc = accuracy_score(true_test[mask], base_test[mask])
+                b_f1  = f1_score(true_test[mask], base_test[mask], average="macro", zero_division=0)
+                t_rows += [
+                    {"model": _LABELS[clf_model], "time_into_fault_s": T,
+                     "accuracy": round(t_acc, 4), "macro_f1": round(t_f1, 4)},
+                    {"model": "FullRuleBaseline", "time_into_fault_s": T,
+                     "accuracy": round(b_acc, 4), "macro_f1": round(b_f1, 4)},
+                ]
+                logger.info("    holdout T=%2ds → accuracy=%.3f  macro-F1=%.3f   (full-rule baseline %.3f / %.3f)",
+                            T, t_acc, t_f1, b_acc, b_f1)
+            if t_rows:
+                pd.DataFrame(t_rows).to_csv(results_dir / "accuracy_vs_time_holdout.csv", index=False)
+
         # Best regressor on holdout
         reg_path = models_dir / f"reg_{reg_model}_tuned.joblib"
         if reg_path.exists():
@@ -699,20 +824,70 @@ def main(data_path: Path, stage: str, clf_model: str, reg_model: str,
             mae  = mean_absolute_error(y_reg_test, y_pred)
             rmse = float(np.sqrt(np.mean((y_reg_test - y_pred) ** 2)))
             r2   = r2_score(y_reg_test, y_pred)
-            pd.DataFrame([{
-                "model": _LABELS[reg_model],
-                "mae":  round(mae,  4),
-                "rmse": round(rmse, 4),
-                "r2":   round(r2,   4),
-            }]).to_csv(results_dir / "holdout_regression_report.csv", index=False)
+            early_test = early_blast_radius(df_test)
+            b_mae  = mean_absolute_error(y_reg_test, early_test)
+            b_rmse = float(np.sqrt(np.mean((y_reg_test - early_test) ** 2)))
+            b_r2   = r2_score(y_reg_test, early_test)
+            zero_test = no_spread_baseline(df_test)
+            z_mae  = mean_absolute_error(y_reg_test, zero_test)
+            z_rmse = float(np.sqrt(np.mean((y_reg_test - zero_test) ** 2)))
+            z_r2   = r2_score(y_reg_test, zero_test)
+            # the model stays on the first row - visualize.py reads row 0
+            pd.DataFrame([
+                {"model": _LABELS[reg_model], "mae": round(mae, 4), "rmse": round(rmse, 4), "r2": round(r2, 4)},
+                {"model": "EarlyBlastBaseline", "mae": round(b_mae, 4), "rmse": round(b_rmse, 4), "r2": round(b_r2, 4)},
+                {"model": "NoSpreadBaseline", "mae": round(z_mae, 4), "rmse": round(z_rmse, 4), "r2": round(z_r2, 4)},
+            ]).to_csv(results_dir / "holdout_regression_report.csv", index=False)
+            comparison_rows += [
+                _reg_comparison_row("holdout", _LABELS[reg_model], mae, rmse, r2),
+                _reg_comparison_row("holdout", "EarlyBlastBaseline", b_mae, b_rmse, b_r2),
+                _reg_comparison_row("holdout", "NoSpreadBaseline", z_mae, z_rmse, z_r2),
+            ]
+            t_test = df_test["time_into_fault_s"].values
             pd.DataFrame({
                 "model":             _LABELS[reg_model],
                 "true_blast_radius": y_reg_test,
                 "pred_blast_radius": y_pred,
+                "baseline_pred":     early_test,
                 "severity":          df_test["severity"].values,
+                "experiment_id":     df_test["experiment_id"].values,
+                "time_into_fault_s": t_test,
             }).to_csv(results_dir / "holdout_regression_predictions.csv", index=False)
-            logger.info("  %s reg holdout → MAE=%.4f  RMSE=%.4f  R²=%.4f",
-                        _LABELS[reg_model], mae, rmse, r2)
+            logger.info("  %s reg holdout → MAE=%.4f  RMSE=%.4f  R²=%.4f   (final = early baseline MAE=%.4f, "
+                        "always-0 baseline MAE=%.4f)", _LABELS[reg_model], mae, rmse, r2, b_mae, z_mae)
+
+            t_rows = []
+            for T in [15, 30, 45, 60]:
+                mask = t_test == T
+                if mask.sum() == 0:
+                    continue
+                t_mae  = mean_absolute_error(y_reg_test[mask], y_pred[mask])
+                t_rmse = float(np.sqrt(np.mean((y_reg_test[mask] - y_pred[mask]) ** 2)))
+                b_mae_t  = mean_absolute_error(y_reg_test[mask], early_test[mask])
+                b_rmse_t = float(np.sqrt(np.mean((y_reg_test[mask] - early_test[mask]) ** 2)))
+                z_mae_t  = mean_absolute_error(y_reg_test[mask], zero_test[mask])
+                z_rmse_t = float(np.sqrt(np.mean((y_reg_test[mask] - zero_test[mask]) ** 2)))
+                t_rows += [
+                    {"model": _LABELS[reg_model], "time_into_fault_s": T,
+                     "mae": round(t_mae, 4), "rmse": round(t_rmse, 4)},
+                    {"model": "EarlyBlastBaseline", "time_into_fault_s": T,
+                     "mae": round(b_mae_t, 4), "rmse": round(b_rmse_t, 4)},
+                    {"model": "NoSpreadBaseline", "time_into_fault_s": T,
+                     "mae": round(z_mae_t, 4), "rmse": round(z_rmse_t, 4)},
+                ]
+                logger.info("    holdout T=%2ds → MAE=%.3f  RMSE=%.3f   (final = early baseline MAE=%.3f)",
+                            T, t_mae, t_rmse, b_mae_t)
+            if t_rows:
+                pd.DataFrame(t_rows).to_csv(results_dir / "mae_vs_time_holdout.csv", index=False)
+
+    # Model vs no-ML baselines
+    if comparison_rows:
+        pd.DataFrame(comparison_rows).to_csv(results_dir / "baseline_comparison.csv", index=False)
+        logger.info("\nModel vs no-ML baselines:\n%s", pd.DataFrame(comparison_rows).to_string(index=False))
+    if gain_rows:
+        pd.DataFrame(gain_rows).to_csv(results_dir / "forecasting_gain.csv", index=False)
+        logger.info("\nAccuracy where severity changes after the snapshot:\n%s",
+                    pd.DataFrame(gain_rows).to_string(index=False))
 
     logger.info("\nDone. Models → %s/", models_dir)
 
@@ -724,11 +899,11 @@ if __name__ == "__main__":
     parser.add_argument("--stage",     type=str,  default=None,
                         help="Output sub-directory (auto-detected from --data if omitted)")
     parser.add_argument("--clf-model", dest="clf_model", choices=["rf", "xgb", "lgbm"],
-                        default="lgbm",
-                        help="Best classifier from Stage 1 (default: lgbm)")
+                        default="xgb",
+                        help="classifier to tune (default: xgb, the final model)")
     parser.add_argument("--reg-model", dest="reg_model", choices=["rf", "xgb", "lgbm"],
-                        default="rf",
-                        help="Best regressor from Stage 1 (default: rf)")
+                        default="xgb",
+                        help="regressor to tune (default: xgb, the final model)")
     parser.add_argument("--trials",    type=int, default=N_TRIALS)
     parser.add_argument("--eval-only", action="store_true",
                         help="Skip Optuna; load best_params.json and run full evaluation only")

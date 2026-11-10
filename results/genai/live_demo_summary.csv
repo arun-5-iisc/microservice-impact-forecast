@@ -1,0 +1,12 @@
+service,change,change_time_utc,snapshot_s,ml_severity,ml_prob_low,ml_prob_medium,ml_prob_high,ml_blast_radius,investigated,agent_model,agent_severity,agent_cause,agent_action,agent_confidence,tool_calls,investigation_s,cost_usd,slack_sent_utc,change_to_slack_s
+productcatalogservice,network delay (ms): none → 200,04:00:14,15,High,0.141,0.025,0.833,2.34,yes,gpt-6-sol,High,network_latency,rollback_change,0.96,12,22.5,0.0245,04:01:10.84,56.8
+recommendationservice,CPU limit: 200m → 110m,04:04:22,15,High,0.122,0.365,0.513,0.02,yes,gpt-6-sol,High,cpu_limit,rollback_change,0.62,15,26.8,0.0481,04:05:22.26,59.9
+emailservice,replicas: 1 → 0,04:08:12,15,High,0.176,0.021,0.803,0.0,yes,gpt-6-sol,High,service_unavailable,rollback_change,0.81,12,30.9,0.0317,04:09:19.42,66.8
+recommendationservice,memory limit: 450Mi → 220Mi,04:13:02,15,Low,0.851,0.015,0.134,,no,,,,,,,,0,,
+recommendationservice,memory limit: 450Mi → 220Mi,04:13:02,30,Low,0.788,0.122,0.09,,no,,,,,,,,0,,
+recommendationservice,memory limit: 450Mi → 220Mi,04:13:02,45,Low,0.764,0.122,0.114,,no,,,,,,,,0,,
+recommendationservice,memory limit: 450Mi → 220Mi,04:13:02,60,Low,0.816,0.068,0.116,,no,,,,,,,,0,,
+recommendationservice,memory limit: 450Mi → 220Mi,04:19:40,15,Low,0.943,0.016,0.041,,no,,,,,,,,0,,
+recommendationservice,memory limit: 450Mi → 220Mi,04:19:40,30,Low,0.952,0.011,0.036,,no,,,,,,,,0,,
+recommendationservice,memory limit: 450Mi → 220Mi,04:19:40,45,Low,0.958,0.011,0.031,,no,,,,,,,,0,,
+recommendationservice,memory limit: 450Mi → 220Mi,04:19:40,60,Low,0.955,0.009,0.035,,no,,,,,,,,0,,

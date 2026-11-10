@@ -1,0 +1,455 @@
+{
+  "version": 1,
+  "experiments": [
+    {
+      "key": "recommendationservice|cpu|150m|normal|r1",
+      "status": "done",
+      "exp_id": "EXP_0001"
+    },
+    {
+      "key": "recommendationservice|cpu|125m|normal|r1",
+      "status": "done",
+      "exp_id": "EXP_0002"
+    },
+    {
+      "key": "recommendationservice|cpu|100m|normal|r1",
+      "status": "done",
+      "exp_id": "EXP_0003"
+    },
+    {
+      "key": "productcatalogservice|cpu|150m|normal|r1",
+      "status": "done",
+      "exp_id": "EXP_0091"
+    },
+    {
+      "key": "productcatalogservice|cpu|125m|normal|r1",
+      "status": "done",
+      "exp_id": "EXP_0005"
+    },
+    {
+      "key": "productcatalogservice|cpu|100m|normal|r1",
+      "status": "done",
+      "exp_id": "EXP_0006"
+    },
+    {
+      "key": "checkoutservice|cpu|150m|normal|r1",
+      "status": "done",
+      "exp_id": "EXP_0092"
+    },
+    {
+      "key": "checkoutservice|cpu|125m|normal|r1",
+      "status": "done",
+      "exp_id": "EXP_0093"
+    },
+    {
+      "key": "checkoutservice|cpu|100m|normal|r1",
+      "status": "done",
+      "exp_id": "EXP_0009"
+    },
+    {
+      "key": "currencyservice|cpu|150m|normal|r1",
+      "status": "done",
+      "exp_id": "EXP_0010"
+    },
+    {
+      "key": "currencyservice|cpu|125m|normal|r1",
+      "status": "done",
+      "exp_id": "EXP_0011"
+    },
+    {
+      "key": "currencyservice|cpu|100m|normal|r1",
+      "status": "done",
+      "exp_id": "EXP_0012"
+    },
+    {
+      "key": "emailservice|cpu|150m|normal|r1",
+      "status": "done",
+      "exp_id": "EXP_0013"
+    },
+    {
+      "key": "emailservice|cpu|125m|normal|r1",
+      "status": "done",
+      "exp_id": "EXP_0014"
+    },
+    {
+      "key": "emailservice|cpu|100m|normal|r1",
+      "status": "done",
+      "exp_id": "EXP_0135"
+    },
+    {
+      "key": "frontend|cpu|150m|normal|r1",
+      "status": "done",
+      "exp_id": "EXP_0016"
+    },
+    {
+      "key": "frontend|cpu|125m|normal|r1",
+      "status": "done",
+      "exp_id": "EXP_0095"
+    },
+    {
+      "key": "frontend|cpu|100m|normal|r1",
+      "status": "done",
+      "exp_id": "EXP_0018"
+    },
+    {
+      "key": "paymentservice|cpu|150m|normal|r1",
+      "status": "done",
+      "exp_id": "EXP_0019"
+    },
+    {
+      "key": "paymentservice|cpu|125m|normal|r1",
+      "status": "done",
+      "exp_id": "EXP_0020"
+    },
+    {
+      "key": "paymentservice|cpu|100m|normal|r1",
+      "status": "done",
+      "exp_id": "EXP_0096"
+    },
+    {
+      "key": "shippingservice|cpu|150m|normal|r1",
+      "status": "done",
+      "exp_id": "EXP_0097"
+    },
+    {
+      "key": "shippingservice|cpu|125m|normal|r1",
+      "status": "done",
+      "exp_id": "EXP_0098"
+    },
+    {
+      "key": "shippingservice|cpu|100m|normal|r1",
+      "status": "done",
+      "exp_id": "EXP_0024"
+    },
+    {
+      "key": "adservice|cpu|275m|normal|r1",
+      "status": "done",
+      "exp_id": "EXP_0025"
+    },
+    {
+      "key": "adservice|cpu|250m|normal|r1",
+      "status": "done",
+      "exp_id": "EXP_0026"
+    },
+    {
+      "key": "adservice|cpu|200m|normal|r1",
+      "status": "done",
+      "exp_id": "EXP_0027"
+    },
+    {
+      "key": "cartservice|cpu|275m|normal|r1",
+      "status": "done",
+      "exp_id": "EXP_0028"
+    },
+    {
+      "key": "cartservice|cpu|250m|normal|r1",
+      "status": "done",
+      "exp_id": "EXP_0029"
+    },
+    {
+      "key": "cartservice|cpu|200m|normal|r1",
+      "status": "done",
+      "exp_id": "EXP_0030"
+    },
+    {
+      "key": "recommendationservice|memory|337Mi|normal|r1",
+      "status": "done",
+      "exp_id": "EXP_0031"
+    },
+    {
+      "key": "recommendationservice|memory|225Mi|normal|r1",
+      "status": "done",
+      "exp_id": "EXP_0032"
+    },
+    {
+      "key": "recommendationservice|memory|220Mi|normal|r1",
+      "status": "done",
+      "exp_id": "EXP_0033"
+    },
+    {
+      "key": "productcatalogservice|memory|100Mi|normal|r1",
+      "status": "done",
+      "exp_id": "EXP_0034"
+    },
+    {
+      "key": "productcatalogservice|memory|80Mi|normal|r1",
+      "status": "done",
+      "exp_id": "EXP_0035"
+    },
+    {
+      "key": "productcatalogservice|memory|64Mi|normal|r1",
+      "status": "done",
+      "exp_id": "EXP_0036"
+    },
+    {
+      "key": "checkoutservice|memory|100Mi|normal|r1",
+      "status": "done",
+      "exp_id": "EXP_0037"
+    },
+    {
+      "key": "checkoutservice|memory|80Mi|normal|r1",
+      "status": "done",
+      "exp_id": "EXP_0038"
+    },
+    {
+      "key": "checkoutservice|memory|64Mi|normal|r1",
+      "status": "done",
+      "exp_id": "EXP_0039"
+    },
+    {
+      "key": "frontend|memory|100Mi|normal|r1",
+      "status": "done",
+      "exp_id": "EXP_0040"
+    },
+    {
+      "key": "frontend|memory|80Mi|normal|r1",
+      "status": "done",
+      "exp_id": "EXP_0041"
+    },
+    {
+      "key": "frontend|memory|64Mi|normal|r1",
+      "status": "done",
+      "exp_id": "EXP_0042"
+    },
+    {
+      "key": "cartservice|memory|192Mi|normal|r1",
+      "status": "done",
+      "exp_id": "EXP_0043"
+    },
+    {
+      "key": "cartservice|memory|160Mi|normal|r1",
+      "status": "done",
+      "exp_id": "EXP_0044"
+    },
+    {
+      "key": "cartservice|memory|128Mi|normal|r1",
+      "status": "done",
+      "exp_id": "EXP_0045"
+    },
+    {
+      "key": "adservice|memory|225Mi|normal|r1",
+      "status": "done",
+      "exp_id": "EXP_0046"
+    },
+    {
+      "key": "adservice|memory|200Mi|normal|r1",
+      "status": "done",
+      "exp_id": "EXP_0047"
+    },
+    {
+      "key": "adservice|memory|180Mi|normal|r1",
+      "status": "done",
+      "exp_id": "EXP_0048"
+    },
+    {
+      "key": "recommendationservice|replicas|0|normal|r1",
+      "status": "done",
+      "exp_id": "EXP_0099"
+    },
+    {
+      "key": "productcatalogservice|replicas|0|normal|r1",
+      "status": "done",
+      "exp_id": "EXP_0121"
+    },
+    {
+      "key": "checkoutservice|replicas|0|normal|r1",
+      "status": "done",
+      "exp_id": "EXP_0122"
+    },
+    {
+      "key": "frontend|replicas|0|normal|r1",
+      "status": "done",
+      "exp_id": "EXP_0123"
+    },
+    {
+      "key": "cartservice|replicas|0|normal|r1",
+      "status": "done",
+      "exp_id": "EXP_0053"
+    },
+    {
+      "key": "paymentservice|replicas|0|normal|r1",
+      "status": "done",
+      "exp_id": "EXP_0202"
+    },
+    {
+      "key": "shippingservice|replicas|0|normal|r1",
+      "status": "done",
+      "exp_id": "EXP_0125"
+    },
+    {
+      "key": "currencyservice|replicas|0|normal|r1",
+      "status": "done",
+      "exp_id": "EXP_0126"
+    },
+    {
+      "key": "checkoutservice|latency|100|normal|r1",
+      "status": "done",
+      "exp_id": "EXP_0057"
+    },
+    {
+      "key": "checkoutservice|latency|200|normal|r1",
+      "status": "done",
+      "exp_id": "EXP_0058"
+    },
+    {
+      "key": "checkoutservice|latency|500|normal|r1",
+      "status": "done",
+      "exp_id": "EXP_0147"
+    },
+    {
+      "key": "checkoutservice|latency|1000|normal|r1",
+      "status": "done",
+      "exp_id": "EXP_0128"
+    },
+    {
+      "key": "frontend|latency|100|normal|r1",
+      "status": "done",
+      "exp_id": "EXP_0061"
+    },
+    {
+      "key": "frontend|latency|200|normal|r1",
+      "status": "done",
+      "exp_id": "EXP_0062"
+    },
+    {
+      "key": "frontend|latency|500|normal|r1",
+      "status": "done",
+      "exp_id": "EXP_0063"
+    },
+    {
+      "key": "frontend|latency|1000|normal|r1",
+      "status": "done",
+      "exp_id": "EXP_0108"
+    },
+    {
+      "key": "recommendationservice|latency|100|normal|r1",
+      "status": "done",
+      "exp_id": "EXP_0065"
+    },
+    {
+      "key": "recommendationservice|latency|200|normal|r1",
+      "status": "done",
+      "exp_id": "EXP_0066"
+    },
+    {
+      "key": "recommendationservice|latency|500|normal|r1",
+      "status": "done",
+      "exp_id": "EXP_0109"
+    },
+    {
+      "key": "recommendationservice|latency|1000|normal|r1",
+      "status": "done",
+      "exp_id": "EXP_0068"
+    },
+    {
+      "key": "productcatalogservice|latency|100|normal|r1",
+      "status": "done",
+      "exp_id": "EXP_0069"
+    },
+    {
+      "key": "productcatalogservice|latency|200|normal|r1",
+      "status": "done",
+      "exp_id": "EXP_0070"
+    },
+    {
+      "key": "productcatalogservice|latency|500|normal|r1",
+      "status": "done",
+      "exp_id": "EXP_0129"
+    },
+    {
+      "key": "productcatalogservice|latency|1000|normal|r1",
+      "status": "done",
+      "exp_id": "EXP_0111"
+    },
+    {
+      "key": "cartservice|latency|100|normal|r1",
+      "status": "done",
+      "exp_id": "EXP_0073"
+    },
+    {
+      "key": "cartservice|latency|200|normal|r1",
+      "status": "done",
+      "exp_id": "EXP_0074"
+    },
+    {
+      "key": "cartservice|latency|500|normal|r1",
+      "status": "done",
+      "exp_id": "EXP_0112"
+    },
+    {
+      "key": "cartservice|latency|1000|normal|r1",
+      "status": "done",
+      "exp_id": "EXP_0138"
+    },
+    {
+      "key": "checkoutservice|latency|500|high|r1",
+      "status": "done",
+      "exp_id": "EXP_0131"
+    },
+    {
+      "key": "checkoutservice|latency|1000|high|r1",
+      "status": "done",
+      "exp_id": "EXP_0144"
+    },
+    {
+      "key": "frontend|latency|500|high|r1",
+      "status": "done",
+      "exp_id": "EXP_0079"
+    },
+    {
+      "key": "frontend|latency|1000|high|r1",
+      "status": "done",
+      "exp_id": "EXP_0080"
+    },
+    {
+      "key": "productcatalogservice|latency|500|high|r1",
+      "status": "done",
+      "exp_id": "EXP_0081"
+    },
+    {
+      "key": "productcatalogservice|latency|1000|high|r1",
+      "status": "done",
+      "exp_id": "EXP_0082"
+    },
+    {
+      "key": "recommendationservice|cpu|125m|high|r1",
+      "status": "done",
+      "exp_id": "EXP_0083"
+    },
+    {
+      "key": "recommendationservice|cpu|100m|high|r1",
+      "status": "done",
+      "exp_id": "EXP_0084"
+    },
+    {
+      "key": "productcatalogservice|cpu|125m|high|r1",
+      "status": "done",
+      "exp_id": "EXP_0085"
+    },
+    {
+      "key": "checkoutservice|cpu|100m|high|r1",
+      "status": "done",
+      "exp_id": "EXP_0116"
+    },
+    {
+      "key": "frontend|cpu|100m|high|r1",
+      "status": "done",
+      "exp_id": "EXP_0087"
+    },
+    {
+      "key": "recommendationservice|replicas|0|high|r1",
+      "status": "done",
+      "exp_id": "EXP_0150"
+    },
+    {
+      "key": "productcatalogservice|replicas|0|high|r1",
+      "status": "done",
+      "exp_id": "EXP_0141"
+    },
+    {
+      "key": "checkoutservice|replicas|0|high|r1",
+      "status": "done",
+      "exp_id": "EXP_0119"
+    }
+  ]
+}

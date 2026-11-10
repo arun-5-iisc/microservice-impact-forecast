@@ -1,0 +1,40 @@
+Real (non-health-check) server requests per service in the 60 s baseline, median over runs:
+productcatalogservice    906
+currencyservice          508
+frontend                 177
+recommendationservice    118
+checkoutservice            7
+emailservice               7
+paymentservice             7
+
+=== No fault vs fault, 30 s vs 30 s (mean services counted 'affected') ===
+            D0 null  D0 signal  D1 null  D1 signal  D2 null  D2 signal
+fault_type                                                            
+cpu            2.25       2.07     1.51       1.64     0.00       0.06
+latency        2.60       2.58     1.76       2.20     0.00       0.69
+memory         3.19       2.77     2.19       1.90     0.00       0.10
+replicas       2.80       1.70     1.75       1.75     0.00       0.55
+ALL            2.65       2.41     1.78       1.95     0.00       0.38
+(D0 = current; D1 = own server spans of real requests, mean > 10%; D2 = D1 spans + Mann-Whitney p < 0.01 + median > 20% + n >= 10)
+
+=== Blast radius over the real 60 s windows, by fault type (mean / share of runs > 0) ===
+             D0   D1   D2
+fault_type               
+cpu        1.84 1.61 0.06
+latency    2.73 2.24 0.72
+memory     2.29 1.67 0.08
+replicas   1.15 1.45 0.55
+            D0 >0  D1 >0  D2 >0
+fault_type                     
+cpu           66%    78%     6%
+latency       74%    90%    48%
+memory        67%    73%     6%
+replicas      50%    70%    40%
+
+=== Repeat pairs (20) ===
+D0: same value 3/20, mean |diff| 2.00, ICC 0.32, mean 2.50
+D1: same value 10/20, mean |diff| 1.00, ICC 0.32, mean 1.95, cross-run baseline null 1.65
+D2: same value 17/20, mean |diff| 0.30, ICC 0.05, mean 0.20, cross-run baseline null 0.10
+Per pair (D2): checkout cpu 100m: 0/0, checkout cpu 125m: 0/0, checkout cpu 150m: 0/0, checkout latency 200: 0/0, checkout memory 64Mi: 0/0, currency cpu 125m: 0/0, email latency 100: 4/0, email memory 100Mi: 0/0, email memory 64Mi: 1/0, email memory 80Mi: 0/0, payment cpu 100m: 0/0, payment cpu 125m: 0/0, payment memory 128Mi: 0/0, payment memory 160Mi: 0/0, payment memory 192Mi: 0/0, productcatalog cpu 100m: 0/1, productcatalog cpu 150m: 0/0, recommendation latency 100: 1/1, recommendation memory 220Mi: 0/0, shipping cpu 150m: 0/0
+
+D2: runs in which each service is counted as affected: {'frontend': 33, 'productcatalogservice': 26, 'recommendationservice': 16, 'currencyservice': 15, 'checkoutservice': 5}

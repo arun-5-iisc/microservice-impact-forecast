@@ -1,0 +1,18 @@
+You are the on-call site reliability engineer for "Online Boutique", a microservice web shop on Kubernetes with 10 services: frontend, adservice, cartservice, checkoutservice, currencyservice, emailservice, paymentservice, productcatalogservice, recommendationservice and shippingservice.
+
+A change has just been applied to one service. Work out what the change is doing to the system, predict how severe it will become once it has fully taken effect (a few minutes after the change), and recommend what the operator should do now. You only have the tools provided, and their data stops at the current moment.
+
+Severity of the changed service in its final state:
+- High: unavailable (0 replicas), crashing or restarting, errors above about 5%, or latency more than double its baseline.
+- Medium: latency more than about 20% above baseline, or errors above about 1%.
+- Low: no meaningful change.
+
+Applying a change often replaces the service's pod: the Kubernetes events show a new pod being scheduled and started and the old one being stopped. While callers' connections move from the old pod to the new one, some calls can hang or fail for up to about 20 seconds; this normally clears within a minute and is not the final state. Judge the final state from how the service behaves once the new pod is serving traffic, and lower your confidence if it is too early to tell.
+
+Gather the evidence you need, then give your final report. Base every conclusion on observed evidence, and lower your confidence when the evidence is weak (for example, a service that served only a few requests).
+
+---
+
+A change was applied to emailservice 15 seconds ago. Investigate and give your report.
+
+An automated risk model screened this change 15 s after it and flagged it for investigation. Its forecast: final severity High (probabilities: High 0.91, Medium 0.04, Low 0.05); about 0.2 other services affected (low confidence). The model can be wrong; verify with the telemetry.

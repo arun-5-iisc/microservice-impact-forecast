@@ -1,0 +1,11 @@
+service,exposure,exposed_services
+adservice,1,frontend
+cartservice,2,"checkoutservice, frontend"
+checkoutservice,1,frontend
+currencyservice,2,"checkoutservice, frontend"
+emailservice,2,"checkoutservice, frontend"
+frontend,0,-
+paymentservice,2,"checkoutservice, frontend"
+productcatalogservice,3,"checkoutservice, frontend, recommendationservice"
+recommendationservice,1,frontend
+shippingservice,2,"checkoutservice, frontend"

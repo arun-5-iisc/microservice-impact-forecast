@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# install.sh — Install Chaos Mesh on a GKE Standard cluster
+# install.sh , it installs Chaos Mesh on a GKE Standard cluster
 #
 # Requirements:
-#   - kubectl configured and pointing at your GKE cluster
-#   - helm 3.x installed
-#   - GKE Standard cluster (NOT Autopilot — Autopilot blocks privileged DaemonSets)
+#   * kubectl configured and pointing at your GKE cluster
+#   * helm 3.x installed
+#   * GKE Standard cluster (NOT Autopilot - Autopilot blocks privileged DaemonSets)
 #
 # Usage:
 #   chmod +x deployment/chaos-mesh/install.sh
@@ -19,7 +19,7 @@ set -euo pipefail
 
 NAMESPACE="chaos-mesh"
 RELEASE="chaos-mesh"
-VERSION="2.6.3"      # pin for reproducibility; check https://github.com/chaos-mesh/chaos-mesh/releases
+VERSION="2.6.3"      
 
 # Colours for output
 GREEN='\033[0;32m'
@@ -31,7 +31,7 @@ info()  { echo -e "${GREEN}[INFO]${NC}  $*"; }
 warn()  { echo -e "${YELLOW}[WARN]${NC}  $*"; }
 error() { echo -e "${RED}[ERROR]${NC} $*" >&2; exit 1; }
 
-# ─── Preflight checks ────────────────────────────────────────────────────────
+# Preflight checks
 
 info "Checking prerequisites..."
 
@@ -51,7 +51,7 @@ if kubectl get nodes -o jsonpath='{.items[0].metadata.labels}' 2>/dev/null \
   error "This appears to be a GKE Autopilot cluster. Chaos Mesh requires a Standard cluster (privileged DaemonSets are not allowed on Autopilot)."
 fi
 
-# ─── Skip if already installed ───────────────────────────────────────────────
+# Skip if already installed
 
 if helm status "${RELEASE}" -n "${NAMESPACE}" >/dev/null 2>&1; then
   INSTALLED_VERSION=$(helm list -n "${NAMESPACE}" -o json \
@@ -61,13 +61,13 @@ if helm status "${RELEASE}" -n "${NAMESPACE}" >/dev/null 2>&1; then
   exit 0
 fi
 
-# ─── Add Helm repo ───────────────────────────────────────────────────────────
+# Add Helm repo
 
 info "Adding chaos-mesh Helm repo..."
 helm repo add chaos-mesh https://charts.chaos-mesh.org 2>/dev/null || true
 helm repo update chaos-mesh
 
-# ─── Install ─────────────────────────────────────────────────────────────────
+# Install
 
 info "Installing Chaos Mesh ${VERSION} in namespace '${NAMESPACE}'..."
 
@@ -81,7 +81,7 @@ helm install "${RELEASE}" chaos-mesh/chaos-mesh \
   --wait \
   --timeout 5m
 
-# ─── Verify ──────────────────────────────────────────────────────────────────
+# Verify
 
 info "Waiting for all Chaos Mesh pods to be Running..."
 kubectl wait --for=condition=Ready pod \

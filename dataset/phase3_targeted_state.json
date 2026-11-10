@@ -1,0 +1,799 @@
+{
+  "version": 1,
+  "experiments": [
+    {
+      "key": "shippingservice|cpu|150m|normal|r1",
+      "status": "done",
+      "excluded_runs": [
+        {
+          "exp_id": "EXP_0203",
+          "reason": "interrupted during the fault phase; left shippingservice at a 150m CPU limit"
+        },
+        {
+          "exp_id": "EXP_0204",
+          "reason": "ran while shippingservice's CPU limit was still 150m, left by interrupted attempt EXP_0203"
+        }
+      ],
+      "exp_id": "EXP_0308",
+      "uploaded": true
+    },
+    {
+      "key": "currencyservice|cpu|125m|normal|r1",
+      "status": "done",
+      "excluded_runs": [
+        {
+          "exp_id": "EXP_0205",
+          "reason": "ran while shippingservice's CPU limit was still 150m, left by interrupted attempt EXP_0203"
+        },
+        {
+          "exp_id": "EXP_0211",
+          "reason": "ran on 3 x n1-standard-4 (ff-2's first node pool); the final dataset uses 3 x e2-standard-2"
+        }
+      ],
+      "exp_id": "EXP_0305",
+      "uploaded": true
+    },
+    {
+      "key": "paymentservice|cpu|125m|normal|r1",
+      "status": "done",
+      "excluded_runs": [
+        {
+          "exp_id": "EXP_0206",
+          "reason": "ran while shippingservice's CPU limit was still 150m, left by interrupted attempt EXP_0203"
+        }
+      ],
+      "exp_id": "EXP_0309",
+      "uploaded": true
+    },
+    {
+      "key": "emailservice|memory|80Mi|normal|r1",
+      "status": "done",
+      "excluded_runs": [
+        {
+          "exp_id": "EXP_0207",
+          "reason": "ran while shippingservice's CPU limit was still 150m, left by interrupted attempt EXP_0203"
+        },
+        {
+          "exp_id": "EXP_0212",
+          "reason": "ran on 3 x n1-standard-4 (ff-2's first node pool); the final dataset uses 3 x e2-standard-2"
+        }
+      ],
+      "exp_id": "EXP_0306",
+      "uploaded": true
+    },
+    {
+      "key": "paymentservice|memory|160Mi|normal|r1",
+      "status": "done",
+      "excluded_runs": [
+        {
+          "exp_id": "EXP_0208",
+          "reason": "ran while shippingservice's CPU limit was still 150m, left by interrupted attempt EXP_0203"
+        }
+      ],
+      "exp_id": "EXP_0310",
+      "uploaded": true
+    },
+    {
+      "key": "checkoutservice|latency|200|normal|r1",
+      "status": "done",
+      "excluded_runs": [
+        {
+          "exp_id": "EXP_0209",
+          "reason": "ran while shippingservice's CPU limit was still 150m, left by interrupted attempt EXP_0203"
+        },
+        {
+          "exp_id": "EXP_0213",
+          "reason": "ran on 3 x n1-standard-4 (ff-2's first node pool); the final dataset uses 3 x e2-standard-2"
+        }
+      ],
+      "exp_id": "EXP_0307",
+      "uploaded": true
+    },
+    {
+      "key": "emailservice|latency|100|normal|r1",
+      "status": "done",
+      "excluded_runs": [
+        {
+          "exp_id": "EXP_0210",
+          "reason": "ran while shippingservice's CPU limit was still 150m, left by interrupted attempt EXP_0203"
+        }
+      ],
+      "exp_id": "EXP_0311",
+      "uploaded": true
+    },
+    {
+      "key": "checkoutservice|cpu|100m|normal|r1",
+      "status": "done",
+      "exp_id": "EXP_0312",
+      "uploaded": true
+    },
+    {
+      "key": "checkoutservice|cpu|125m|normal|r1",
+      "status": "done",
+      "exp_id": "EXP_0313",
+      "uploaded": true
+    },
+    {
+      "key": "checkoutservice|cpu|150m|normal|r1",
+      "status": "done",
+      "exp_id": "EXP_0314",
+      "uploaded": true
+    },
+    {
+      "key": "paymentservice|cpu|100m|normal|r1",
+      "status": "done",
+      "exp_id": "EXP_0315",
+      "uploaded": true
+    },
+    {
+      "key": "productcatalogservice|cpu|100m|normal|r1",
+      "status": "done",
+      "exp_id": "EXP_0316",
+      "uploaded": true
+    },
+    {
+      "key": "productcatalogservice|cpu|150m|normal|r1",
+      "status": "done",
+      "exp_id": "EXP_0317",
+      "uploaded": true
+    },
+    {
+      "key": "recommendationservice|latency|100|normal|r1",
+      "status": "done",
+      "exp_id": "EXP_0318",
+      "uploaded": true
+    },
+    {
+      "key": "checkoutservice|memory|64Mi|normal|r1",
+      "status": "done",
+      "exp_id": "EXP_0319",
+      "uploaded": true
+    },
+    {
+      "key": "emailservice|memory|64Mi|normal|r1",
+      "status": "done",
+      "exp_id": "EXP_0320",
+      "uploaded": true
+    },
+    {
+      "key": "emailservice|memory|100Mi|normal|r1",
+      "status": "done",
+      "exp_id": "EXP_0321",
+      "uploaded": true
+    },
+    {
+      "key": "paymentservice|memory|128Mi|normal|r1",
+      "status": "done",
+      "exp_id": "EXP_0322",
+      "uploaded": true
+    },
+    {
+      "key": "paymentservice|memory|192Mi|normal|r1",
+      "status": "done",
+      "exp_id": "EXP_0323",
+      "uploaded": true
+    },
+    {
+      "key": "recommendationservice|memory|220Mi|normal|r1",
+      "status": "done",
+      "exp_id": "EXP_0324",
+      "uploaded": true
+    },
+    {
+      "key": "checkoutservice|latency|25|normal|r1",
+      "status": "done",
+      "exp_id": "EXP_0325",
+      "uploaded": true
+    },
+    {
+      "key": "checkoutservice|latency|50|normal|r1",
+      "status": "done",
+      "exp_id": "EXP_0326",
+      "uploaded": true
+    },
+    {
+      "key": "currencyservice|latency|25|normal|r1",
+      "status": "done",
+      "exp_id": "EXP_0327",
+      "uploaded": true
+    },
+    {
+      "key": "currencyservice|latency|50|normal|r1",
+      "status": "done",
+      "exp_id": "EXP_0328",
+      "uploaded": true
+    },
+    {
+      "key": "frontend|latency|25|normal|r1",
+      "status": "done",
+      "exp_id": "EXP_0329",
+      "uploaded": true
+    },
+    {
+      "key": "frontend|latency|50|normal|r1",
+      "status": "done",
+      "exp_id": "EXP_0330",
+      "uploaded": true
+    },
+    {
+      "key": "productcatalogservice|latency|25|normal|r1",
+      "status": "done",
+      "exp_id": "EXP_0331",
+      "uploaded": true
+    },
+    {
+      "key": "productcatalogservice|latency|50|normal|r1",
+      "status": "done",
+      "exp_id": "EXP_0332",
+      "uploaded": true
+    },
+    {
+      "key": "adservice|latency|300|normal|r1",
+      "status": "done",
+      "exp_id": "EXP_0333",
+      "uploaded": true
+    },
+    {
+      "key": "adservice|latency|400|normal|r1",
+      "status": "done",
+      "exp_id": "EXP_0334",
+      "uploaded": true
+    },
+    {
+      "key": "cartservice|latency|300|normal|r1",
+      "status": "done",
+      "exp_id": "EXP_0335",
+      "uploaded": true
+    },
+    {
+      "key": "cartservice|latency|400|normal|r1",
+      "status": "done",
+      "exp_id": "EXP_0336",
+      "uploaded": true
+    },
+    {
+      "key": "emailservice|latency|300|normal|r1",
+      "status": "done",
+      "exp_id": "EXP_0337",
+      "uploaded": true
+    },
+    {
+      "key": "emailservice|latency|400|normal|r1",
+      "status": "done",
+      "exp_id": "EXP_0338",
+      "uploaded": true
+    },
+    {
+      "key": "shippingservice|latency|300|normal|r1",
+      "status": "done",
+      "exp_id": "EXP_0339",
+      "uploaded": true
+    },
+    {
+      "key": "shippingservice|latency|400|normal|r1",
+      "status": "done",
+      "exp_id": "EXP_0340",
+      "uploaded": true
+    },
+    {
+      "key": "recommendationservice|latency|750|normal|r1",
+      "status": "done",
+      "exp_id": "EXP_0341",
+      "uploaded": true
+    },
+    {
+      "key": "currencyservice|cpu|110m|normal|r1",
+      "status": "done",
+      "exp_id": "EXP_0342",
+      "uploaded": true
+    },
+    {
+      "key": "currencyservice|cpu|140m|normal|r1",
+      "status": "done",
+      "exp_id": "EXP_0343",
+      "uploaded": true
+    },
+    {
+      "key": "emailservice|cpu|110m|normal|r1",
+      "status": "done",
+      "exp_id": "EXP_0344",
+      "uploaded": true
+    },
+    {
+      "key": "recommendationservice|cpu|110m|normal|r1",
+      "status": "done",
+      "exp_id": "EXP_0345",
+      "uploaded": true
+    },
+    {
+      "key": "checkoutservice|memory|72Mi|normal|r1",
+      "status": "done",
+      "exp_id": "EXP_0346",
+      "uploaded": true
+    },
+    {
+      "key": "currencyservice|memory|144Mi|normal|r1",
+      "status": "done",
+      "exp_id": "EXP_0347",
+      "uploaded": true
+    },
+    {
+      "key": "checkoutservice|memory|64Mi|high|r1",
+      "status": "done",
+      "exp_id": "EXP_0348",
+      "uploaded": true
+    },
+    {
+      "key": "currencyservice|memory|128Mi|high|r1",
+      "status": "done",
+      "exp_id": "EXP_0349",
+      "uploaded": true
+    },
+    {
+      "key": "emailservice|memory|80Mi|high|r1",
+      "status": "done",
+      "exp_id": "EXP_0350",
+      "uploaded": true
+    },
+    {
+      "key": "paymentservice|memory|160Mi|high|r1",
+      "status": "done",
+      "exp_id": "EXP_0351",
+      "uploaded": true
+    },
+    {
+      "key": "recommendationservice|memory|220Mi|high|r1",
+      "status": "done",
+      "exp_id": "EXP_0352",
+      "uploaded": true
+    },
+    {
+      "key": "currencyservice|cpu|125m|high|r1",
+      "status": "done",
+      "exp_id": "EXP_0353",
+      "uploaded": true
+    },
+    {
+      "key": "emailservice|cpu|100m|high|r1",
+      "status": "done",
+      "exp_id": "EXP_0354",
+      "uploaded": true
+    },
+    {
+      "key": "paymentservice|cpu|125m|high|r1",
+      "status": "done",
+      "exp_id": "EXP_0355",
+      "uploaded": true
+    },
+    {
+      "key": "checkoutservice|latency|35|normal|r1",
+      "status": "done",
+      "exp_id": "EXP_0356",
+      "uploaded": true
+    },
+    {
+      "key": "checkoutservice|latency|75|normal|r1",
+      "status": "done",
+      "exp_id": "EXP_0357",
+      "uploaded": true
+    },
+    {
+      "key": "currencyservice|latency|35|normal|r1",
+      "status": "done",
+      "exp_id": "EXP_0358",
+      "uploaded": true
+    },
+    {
+      "key": "currencyservice|latency|75|normal|r1",
+      "status": "done",
+      "exp_id": "EXP_0359",
+      "uploaded": true
+    },
+    {
+      "key": "frontend|latency|35|normal|r1",
+      "status": "done",
+      "exp_id": "EXP_0360",
+      "uploaded": true
+    },
+    {
+      "key": "frontend|latency|75|normal|r1",
+      "status": "done",
+      "exp_id": "EXP_0361",
+      "uploaded": true
+    },
+    {
+      "key": "productcatalogservice|latency|35|normal|r1",
+      "status": "done",
+      "exp_id": "EXP_0362",
+      "uploaded": true
+    },
+    {
+      "key": "productcatalogservice|latency|75|normal|r1",
+      "status": "done",
+      "exp_id": "EXP_0363",
+      "uploaded": true
+    },
+    {
+      "key": "adservice|latency|250|normal|r1",
+      "status": "done",
+      "exp_id": "EXP_0364",
+      "uploaded": true
+    },
+    {
+      "key": "adservice|latency|450|normal|r1",
+      "status": "done",
+      "exp_id": "EXP_0365",
+      "uploaded": true
+    },
+    {
+      "key": "cartservice|latency|250|normal|r1",
+      "status": "done",
+      "exp_id": "EXP_0366",
+      "uploaded": true
+    },
+    {
+      "key": "cartservice|latency|450|normal|r1",
+      "status": "done",
+      "exp_id": "EXP_0367",
+      "uploaded": true
+    },
+    {
+      "key": "emailservice|latency|250|normal|r1",
+      "status": "done",
+      "exp_id": "EXP_0368",
+      "uploaded": true
+    },
+    {
+      "key": "emailservice|latency|450|normal|r1",
+      "status": "done",
+      "exp_id": "EXP_0369",
+      "uploaded": true
+    },
+    {
+      "key": "shippingservice|latency|250|normal|r1",
+      "status": "done",
+      "exp_id": "EXP_0370",
+      "uploaded": true
+    },
+    {
+      "key": "shippingservice|latency|450|normal|r1",
+      "status": "done",
+      "exp_id": "EXP_0371",
+      "uploaded": true
+    },
+    {
+      "key": "recommendationservice|latency|600|normal|r1",
+      "status": "done",
+      "exp_id": "EXP_0372",
+      "uploaded": true
+    },
+    {
+      "key": "recommendationservice|latency|900|normal|r1",
+      "status": "done",
+      "exp_id": "EXP_0373",
+      "uploaded": true
+    },
+    {
+      "key": "paymentservice|latency|150|normal|r1",
+      "status": "done",
+      "exp_id": "EXP_0374",
+      "uploaded": true
+    },
+    {
+      "key": "adservice|cpu|200m|high|r1",
+      "status": "done",
+      "exp_id": "EXP_0375",
+      "uploaded": true
+    },
+    {
+      "key": "adservice|cpu|250m|high|r1",
+      "status": "done",
+      "exp_id": "EXP_0376",
+      "uploaded": true
+    },
+    {
+      "key": "adservice|memory|180Mi|high|r1",
+      "status": "done",
+      "exp_id": "EXP_0377",
+      "uploaded": true
+    },
+    {
+      "key": "adservice|latency|100|high|r1",
+      "status": "done",
+      "exp_id": "EXP_0378",
+      "uploaded": true
+    },
+    {
+      "key": "adservice|latency|500|high|r1",
+      "status": "done",
+      "skip_history": "Skipped at first: latency faults of 450 ms and above sometimes stalled the restore step for 23-56 min (Chaos Mesh waiting on a crash-looping pod); run later, at the user's request",
+      "exp_id": "EXP_0415",
+      "uploaded": true
+    },
+    {
+      "key": "adservice|replicas|0|high|r1",
+      "status": "done",
+      "exp_id": "EXP_0379",
+      "uploaded": true
+    },
+    {
+      "key": "cartservice|cpu|200m|high|r1",
+      "status": "done",
+      "exp_id": "EXP_0380",
+      "uploaded": true
+    },
+    {
+      "key": "cartservice|cpu|250m|high|r1",
+      "status": "done",
+      "exp_id": "EXP_0381",
+      "uploaded": true
+    },
+    {
+      "key": "cartservice|memory|128Mi|high|r1",
+      "status": "done",
+      "exp_id": "EXP_0382",
+      "uploaded": true
+    },
+    {
+      "key": "cartservice|latency|100|high|r1",
+      "status": "done",
+      "exp_id": "EXP_0383",
+      "uploaded": true
+    },
+    {
+      "key": "cartservice|latency|500|high|r1",
+      "status": "done",
+      "skip_history": "Skipped at first: latency faults of 450 ms and above sometimes stalled the restore step for 23-56 min (Chaos Mesh waiting on a crash-looping pod); run later, at the user's request",
+      "exp_id": "EXP_0416",
+      "uploaded": true
+    },
+    {
+      "key": "cartservice|replicas|0|high|r1",
+      "status": "done",
+      "exp_id": "EXP_0384",
+      "uploaded": true
+    },
+    {
+      "key": "checkoutservice|cpu|150m|high|r1",
+      "status": "done",
+      "exp_id": "EXP_0385",
+      "uploaded": true
+    },
+    {
+      "key": "checkoutservice|latency|100|high|r1",
+      "status": "done",
+      "exp_id": "EXP_0386",
+      "uploaded": true
+    },
+    {
+      "key": "currencyservice|cpu|100m|high|r1",
+      "status": "done",
+      "exp_id": "EXP_0387",
+      "uploaded": true
+    },
+    {
+      "key": "currencyservice|cpu|150m|high|r1",
+      "status": "done",
+      "exp_id": "EXP_0388",
+      "uploaded": true
+    },
+    {
+      "key": "currencyservice|latency|100|high|r1",
+      "status": "done",
+      "exp_id": "EXP_0389",
+      "uploaded": true
+    },
+    {
+      "key": "currencyservice|replicas|0|high|r1",
+      "status": "done",
+      "exp_id": "EXP_0390",
+      "uploaded": true
+    },
+    {
+      "key": "emailservice|cpu|150m|high|r1",
+      "status": "done",
+      "exp_id": "EXP_0391",
+      "uploaded": true
+    },
+    {
+      "key": "emailservice|memory|64Mi|high|r1",
+      "status": "done",
+      "exp_id": "EXP_0392",
+      "uploaded": true
+    },
+    {
+      "key": "emailservice|latency|100|high|r1",
+      "status": "done",
+      "exp_id": "EXP_0393",
+      "uploaded": true
+    },
+    {
+      "key": "emailservice|latency|500|high|r1",
+      "status": "done",
+      "skip_history": "Skipped at first: latency faults of 450 ms and above sometimes stalled the restore step for 23-56 min (Chaos Mesh waiting on a crash-looping pod); run later, at the user's request",
+      "exp_id": "EXP_0417",
+      "uploaded": true
+    },
+    {
+      "key": "emailservice|replicas|0|high|r1",
+      "status": "done",
+      "exp_id": "EXP_0394",
+      "uploaded": true
+    },
+    {
+      "key": "frontend|cpu|150m|high|r1",
+      "status": "done",
+      "exp_id": "EXP_0395",
+      "uploaded": true
+    },
+    {
+      "key": "frontend|memory|64Mi|high|r1",
+      "status": "done",
+      "exp_id": "EXP_0396",
+      "uploaded": true
+    },
+    {
+      "key": "frontend|latency|100|high|r1",
+      "status": "done",
+      "exp_id": "EXP_0397",
+      "uploaded": true
+    },
+    {
+      "key": "frontend|replicas|0|high|r1",
+      "status": "done",
+      "exp_id": "EXP_0398",
+      "uploaded": true
+    },
+    {
+      "key": "paymentservice|cpu|100m|high|r1",
+      "status": "done",
+      "exp_id": "EXP_0399",
+      "uploaded": true
+    },
+    {
+      "key": "paymentservice|cpu|150m|high|r1",
+      "status": "done",
+      "exp_id": "EXP_0400",
+      "uploaded": true
+    },
+    {
+      "key": "paymentservice|memory|128Mi|high|r1",
+      "status": "done",
+      "exp_id": "EXP_0401",
+      "uploaded": true
+    },
+    {
+      "key": "paymentservice|latency|100|high|r1",
+      "status": "done",
+      "exp_id": "EXP_0402",
+      "uploaded": true
+    },
+    {
+      "key": "paymentservice|replicas|0|high|r1",
+      "status": "done",
+      "exp_id": "EXP_0403",
+      "uploaded": true
+    },
+    {
+      "key": "productcatalogservice|cpu|100m|high|r1",
+      "status": "done",
+      "exp_id": "EXP_0404",
+      "uploaded": true
+    },
+    {
+      "key": "productcatalogservice|cpu|150m|high|r1",
+      "status": "done",
+      "exp_id": "EXP_0405",
+      "uploaded": true
+    },
+    {
+      "key": "productcatalogservice|memory|64Mi|high|r1",
+      "status": "done",
+      "exp_id": "EXP_0406",
+      "uploaded": true
+    },
+    {
+      "key": "productcatalogservice|latency|100|high|r1",
+      "status": "done",
+      "exp_id": "EXP_0407",
+      "uploaded": true
+    },
+    {
+      "key": "recommendationservice|cpu|150m|high|r1",
+      "status": "done",
+      "exp_id": "EXP_0408",
+      "uploaded": true
+    },
+    {
+      "key": "recommendationservice|latency|100|high|r1",
+      "status": "done",
+      "exp_id": "EXP_0409",
+      "uploaded": true
+    },
+    {
+      "key": "recommendationservice|latency|500|high|r1",
+      "status": "done",
+      "skip_history": "Skipped at first: latency faults of 450 ms and above sometimes stalled the restore step for 23-56 min (Chaos Mesh waiting on a crash-looping pod); run later, at the user's request",
+      "exp_id": "EXP_0418",
+      "uploaded": true
+    },
+    {
+      "key": "shippingservice|cpu|100m|high|r1",
+      "status": "done",
+      "exp_id": "EXP_0410",
+      "uploaded": true
+    },
+    {
+      "key": "shippingservice|cpu|150m|high|r1",
+      "status": "done",
+      "exp_id": "EXP_0411",
+      "uploaded": true
+    },
+    {
+      "key": "shippingservice|memory|64Mi|high|r1",
+      "status": "done",
+      "exp_id": "EXP_0412",
+      "uploaded": true
+    },
+    {
+      "key": "shippingservice|latency|100|high|r1",
+      "status": "done",
+      "exp_id": "EXP_0413",
+      "uploaded": true
+    },
+    {
+      "key": "shippingservice|replicas|0|high|r1",
+      "status": "done",
+      "exp_id": "EXP_0414",
+      "uploaded": true
+    },
+    {
+      "key": "recommendationservice|memory|220Mi|normal|r2",
+      "status": "done",
+      "exp_id": "EXP_0304",
+      "uploaded": true
+    },
+    {
+      "key": "checkoutservice|latency|1000|normal|r2",
+      "status": "done",
+      "exp_id": "EXP_0419",
+      "uploaded": true
+    },
+    {
+      "key": "productcatalogservice|latency|1000|normal|r2",
+      "status": "done",
+      "exp_id": "EXP_0420",
+      "uploaded": true
+    },
+    {
+      "key": "emailservice|latency|200|normal|r2",
+      "status": "done",
+      "exp_id": "EXP_0421",
+      "uploaded": true
+    },
+    {
+      "key": "emailservice|latency|500|normal|r2",
+      "status": "done",
+      "exp_id": "EXP_0422",
+      "uploaded": true
+    },
+    {
+      "key": "emailservice|latency|1000|normal|r2",
+      "status": "done",
+      "exp_id": "EXP_0423",
+      "uploaded": true
+    },
+    {
+      "key": "paymentservice|latency|1000|high|r2",
+      "status": "done",
+      "exp_id": "EXP_0424",
+      "uploaded": true
+    },
+    {
+      "key": "adservice|replicas|0|normal|r2",
+      "status": "done",
+      "exp_id": "EXP_0425",
+      "uploaded": true
+    }
+  ]
+}

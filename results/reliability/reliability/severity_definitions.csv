@@ -1,0 +1,13 @@
+stat,min_n,window,same_label,kappa_w,Low/Med/High (40 runs),current
+mean,1,final60,12/20,0.5,25/9/6,True
+mean,1,final120,10/20,0.39814814814814814,21/13/6,False
+mean,20,final60,13/20,0.5,27/8/5,False
+mean,20,final120,11/20,0.4088669950738917,23/12/5,False
+median,1,final60,8/20,-0.3500000000000001,28/7/5,False
+median,1,final120,11/20,0.11330049261083752,27/8/5,False
+median,20,final60,12/20,-0.22340425531914887,32/3/5,False
+median,20,final120,13/20,0.16666666666666663,31/4/5,False
+trim10,1,final60,12/20,0.375,26/8/6,False
+trim10,1,final120,12/20,0.15254237288135597,26/8/6,False
+trim10,20,final60,14/20,0.23469387755102045,30/5/5,False
+trim10,20,final120,14/20,0.2647058823529411,28/7/5,False

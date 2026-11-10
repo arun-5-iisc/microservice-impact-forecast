@@ -1,0 +1,7 @@
+split,task,model,mae,rmse,r2
+cv,blast_radius,XGBoost,0.2481,0.4292,
+cv,blast_radius,EarlyBlastBaseline,0.3155,0.6017,
+cv,blast_radius,NoSpreadBaseline,0.5252,0.995,
+holdout,blast_radius,XGBoost,0.2888,0.4804,0.7033
+holdout,blast_radius,EarlyBlastBaseline,0.405,0.6595,0.4406
+holdout,blast_radius,NoSpreadBaseline,0.68,1.1136,-0.5947

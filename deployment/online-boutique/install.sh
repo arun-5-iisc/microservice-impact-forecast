@@ -1,17 +1,11 @@
 #!/usr/bin/env bash
+# install.sh - install or upgrade Online Boutique v0.10.5 from the chart in helm-chart/ with the project's values.yaml, into the namespace set in config/project.yaml.
+# Usage: ./deployment/online-boutique/install.sh [config file]
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-CONFIG_FILE="${1:-}"
-
-if [[ -z "${CONFIG_FILE}" ]]; then
-	if [[ -f "${SCRIPT_DIR}/../../config/pproject.yaml" ]]; then
-		CONFIG_FILE="${SCRIPT_DIR}/../../config/pproject.yaml"
-	else
-		CONFIG_FILE="${SCRIPT_DIR}/../../config/project.yaml"
-	fi
-fi
+CONFIG_FILE="${1:-${SCRIPT_DIR}/../../config/project.yaml}"
 
 if [[ ! -f "${CONFIG_FILE}" ]]; then
 	echo "Config file not found: ${CONFIG_FILE}" >&2

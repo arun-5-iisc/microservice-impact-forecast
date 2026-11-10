@@ -1,0 +1,24 @@
+runs: 244; user impact measurable: 244
+severity and user impact differ in 86 runs
+
+severity of the changed service (rows) vs user impact at the frontend (columns):
+user_impact  Low  Medium  High  All
+severity                           
+Low           67       3     0   70
+Medium        12      11     0   23
+High          48      23    80  151
+All          127      37    80  244
+
+changed service High: user impact per changed service:
+                       high_runs  users_high  users_low
+service                                                
+adservice                     15           5          8
+cartservice                   12          12          0
+checkoutservice               16           6          3
+currencyservice               18          13          1
+emailservice                  21           0         17
+paymentservice                10           1          4
+productcatalogservice         14          13          0
+recommendationservice         19           4         15
+shippingservice               13          13          0
+

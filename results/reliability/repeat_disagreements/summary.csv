@@ -1,0 +1,11 @@
+,value
+settings,20
+same_severity,9
+same_blast,17
+severity_differs,11
+cpu_or_memory,11
+cause_restart,2
+cause_few,6
+cause_busy,3
+few_min_requests,4
+few_max_requests,10

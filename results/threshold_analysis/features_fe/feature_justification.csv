@@ -1,0 +1,23 @@
+feature,category,spearman_vs_severity,spearman_vs_blast_r,missing_pct,rationale
+target_latency_delta,trace,0.114,0.298,2.8,Relative latency change — primary degradation signal
+target_error_rate,trace,0.118,0.027,2.8,Error span fraction — direct user-visible impact
+target_request_rate,trace,0.049,0.311,0.0,Request throughput; drops signal cascading failure
+target_cpu,prometheus,-0.172,-0.159,0.0,Pod CPU; spikes precede OOMKill and latency faults
+target_cpu_delta,prometheus,-0.226,-0.133,0.0,Normalised CPU change from baseline
+target_memory_bytes,prometheus,-0.015,0.024,0.0,Pod memory; pressure leads to OOM restarts
+target_memory_delta,prometheus,0.016,0.004,0.0,Normalised memory change from baseline
+target_replicas,prometheus,-0.452,-0.197,0.0,0 = service unavailable → guaranteed High
+target_restart_count,prometheus,0.397,0.119,0.0,Container restarts under fault → guaranteed High
+system_cpu_mean,prometheus,-0.058,-0.056,0.0,Cluster-wide CPU; captures coordinated degradation
+system_memory_mean,prometheus,0.053,0.089,0.0,Cluster-wide memory; baseline load context
+blast_radius_early,trace,0.222,0.648,0.0,Upstream propagation count; quantifies cascade scope
+max_trace_depth,trace,-0.059,-0.16,0.0,Trace depth; long chains amplify tail latency
+time_into_fault_s,context,0.0,0.0,0.0,Observation window — enables proactive formulation
+fault_value_numeric,context,0.099,0.059,0.0,Fault magnitude; distinguishes mild vs severe injection
+fault_severity_ratio,fe,0.012,-0.05,0.0,Normalised fault magnitude vs service resource limit
+service_depth,fe_topo,-0.042,-0.036,0.0,Call-graph depth — latency amplification along chain
+service_downstream_count,fe_topo,0.023,-0.301,0.0,Fan-out: services this service calls — cascade amplifier
+service_upstream_count,fe_topo,-0.046,0.447,0.0,Fan-in: services that call this service — criticality
+service_is_gateway,fe_topo,0.007,-0.208,0.0,1 if service is the user-facing entry point
+system_error_rate,fe_sys,0.089,0.084,0.0,System-wide error rate across all services
+system_latency_ratio,fe_sys,0.111,0.327,0.0,System-wide latency ratio vs baseline — cluster health

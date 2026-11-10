@@ -1,0 +1,6 @@
+model,Low_f1,Medium_f1,High_f1,macro_f1,accuracy
+RuleBaseline,0.3535,0.0778,0.7107,0.3807,0.5619
+FullRuleBaseline,0.3887,0.0804,0.8,0.423,0.6598
+RandomForest,0.7593,0.1726,0.9438,0.6252,0.8131
+XGBoost,0.7872,0.2421,0.9313,0.6536,0.8183
+LightGBM,0.7947,0.2541,0.9327,0.6605,0.8222

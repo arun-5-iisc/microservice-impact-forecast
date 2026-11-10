@@ -1,0 +1,41 @@
+service,fault,value,traffic,run,group,purpose
+adservice,replicas,0,normal,1,coverage,Coverage: phase 1 had no replicas runs for this service
+emailservice,replicas,0,normal,1,coverage,Coverage: phase 1 had no replicas runs for this service
+paymentservice,latency,500,normal,1,coverage,Coverage: phase 1 had no latency runs for this service
+paymentservice,latency,1000,normal,1,coverage,Coverage: phase 1 had no latency runs for this service
+shippingservice,latency,500,normal,1,coverage,Coverage: phase 1 had no latency runs for this service
+shippingservice,latency,1000,normal,1,coverage,Coverage: phase 1 had no latency runs for this service
+currencyservice,latency,200,normal,1,coverage,Coverage: phase 1 had no latency runs for this service
+currencyservice,latency,500,normal,1,coverage,Coverage: phase 1 had no latency runs for this service
+currencyservice,memory,192Mi,normal,1,coverage,Coverage: phase 1 had no memory runs for this service
+currencyservice,memory,160Mi,normal,1,coverage,Coverage: phase 1 had no memory runs for this service
+currencyservice,memory,128Mi,normal,1,coverage,Coverage: phase 1 had no memory runs for this service
+emailservice,memory,100Mi,normal,1,coverage,Coverage: phase 1 had no memory runs for this service
+emailservice,memory,80Mi,normal,1,coverage,Coverage: phase 1 had no memory runs for this service
+emailservice,memory,64Mi,normal,1,coverage,Coverage: phase 1 had no memory runs for this service
+paymentservice,memory,192Mi,normal,1,coverage,Coverage: phase 1 had no memory runs for this service
+paymentservice,memory,160Mi,normal,1,coverage,Coverage: phase 1 had no memory runs for this service
+paymentservice,memory,128Mi,normal,1,coverage,Coverage: phase 1 had no memory runs for this service
+shippingservice,memory,100Mi,normal,1,coverage,Coverage: phase 1 had no memory runs for this service
+shippingservice,memory,80Mi,normal,1,coverage,Coverage: phase 1 had no memory runs for this service
+shippingservice,memory,64Mi,normal,1,coverage,Coverage: phase 1 had no memory runs for this service
+adservice,latency,100,normal,1,coverage,Coverage: phase 1 had no latency runs for this service
+adservice,latency,200,normal,1,coverage,Coverage: phase 1 had no latency runs for this service
+adservice,latency,500,normal,1,coverage,Coverage: phase 1 had no latency runs for this service
+adservice,latency,1000,normal,1,coverage,Coverage: phase 1 had no latency runs for this service
+currencyservice,latency,100,normal,1,coverage,Coverage: phase 1 had no latency runs for this service
+currencyservice,latency,1000,normal,1,coverage,Coverage: phase 1 had no latency runs for this service
+emailservice,latency,100,normal,1,coverage,Coverage: phase 1 had no latency runs for this service
+emailservice,latency,200,normal,1,coverage,Coverage: phase 1 had no latency runs for this service
+emailservice,latency,500,normal,1,coverage,Coverage: phase 1 had no latency runs for this service
+emailservice,latency,1000,normal,1,coverage,Coverage: phase 1 had no latency runs for this service
+paymentservice,latency,100,normal,1,coverage,Coverage: phase 1 had no latency runs for this service
+paymentservice,latency,200,normal,1,coverage,Coverage: phase 1 had no latency runs for this service
+shippingservice,latency,100,normal,1,coverage,Coverage: phase 1 had no latency runs for this service
+shippingservice,latency,200,normal,1,coverage,Coverage: phase 1 had no latency runs for this service
+paymentservice,latency,500,high,1,coverage,"Coverage: network delay added at high traffic, on the checkout path"
+paymentservice,latency,1000,high,1,coverage,"Coverage: network delay added at high traffic, on the checkout path"
+shippingservice,latency,500,high,1,coverage,"Coverage: network delay added at high traffic, on the checkout path"
+shippingservice,latency,1000,high,1,coverage,"Coverage: network delay added at high traffic, on the checkout path"
+currencyservice,latency,500,high,1,coverage,"Coverage: network delay added at high traffic, on the checkout path"
+currencyservice,latency,1000,high,1,coverage,"Coverage: network delay added at high traffic, on the checkout path"

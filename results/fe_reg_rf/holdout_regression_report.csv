@@ -1,0 +1,4 @@
+model,mae,rmse,r2
+RandomForest,0.2904,0.4333,0.7585
+EarlyBlastBaseline,0.405,0.6595,0.4406
+NoSpreadBaseline,0.68,1.1136,-0.5947

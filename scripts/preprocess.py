@@ -1,11 +1,18 @@
 """
-Builds the proactive ML training dataset from raw experiment data.
+Builds the training dataset from the raw experiment runs.
 
-Proactive formulation:
-  Features = system state at T seconds into the fault phase (T ∈ {15, 30, 45, 60})
-  Labels   = final severity + blast radius from the LAST 60s of the fault phase
+  Features: the state of the system T seconds into the fault phase, T = 15, 30, 45, 60
+  Labels:   final severity and blast radius, measured over the last 60 s of the fault phase
 
-Each experiment produces 4 rows (one per T), so 90 experiments → ~360 training rows.
+So each run gives 4 rows, one per T.
+
+The measurements come from span_measures.py:
+  severity     latency and error rate of the changed service as its callers saw them (frontend: its
+               own spans), last 60 s vs baseline. The latency rule is only applied when there are
+               enough requests to tell a change from chance at the 5% level; otherwise
+               final_latency_delta is left empty.
+  blast radius other services that got significantly slower or started erroring.
+Every measurement behind each run's labels is also written to label_measurements.csv.
 
 Usage:
   python scripts/preprocess.py
@@ -17,6 +24,9 @@ import logging
 from pathlib import Path
 
 import pandas as pd
+
+from span_measures import (SEVERITY_ALPHA, blast_radius, enough_requests, parse_spans, summary, target_view,
+                           window)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -32,20 +42,18 @@ DEFAULT_OUT  = REPO_ROOT / "dataset" / "processed" / "training_dataset.csv"
 SNAPSHOT_OFFSETS = [15, 30, 45, 60]   # seconds into fault phase
 LABEL_WINDOW     = 60                  # seconds before fault end used for labels
 
-LATENCY_DELTA_HIGH   = 1.0    # >100% increase → High
-LATENCY_DELTA_MEDIUM = 0.20   # >20%  increase → Medium
+LATENCY_DELTA_HIGH   = 1.0    # >100% increase -> High
+LATENCY_DELTA_MEDIUM = 0.20   # >20%  increase -> Medium
 ERROR_RATE_HIGH      = 0.05
 ERROR_RATE_MEDIUM    = 0.01
 
-# Services without COLLECTOR_SERVICE_ADDR / OTEL_SERVICE_NAME in their Helm
-# templates — traces are never exported to Jaeger for these services.
-# Evidence: deployment/online-boutique/helm-chart/templates/{service}.yaml
+# These export no spans in Online Boutique v0.10.5: adservice and cartservice have no tracing
+# settings in their Helm templates. SO span from them are measured from
+# their callers' client spans. latency_observable records this as a feature.
 NO_TRACE_SERVICES = {"adservice", "cartservice", "shippingservice"}
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # Prometheus helpers
-# ─────────────────────────────────────────────────────────────────────────────
 
 def _load_prometheus(exp_dir: Path) -> pd.DataFrame:
     path = exp_dir / "prometheus.csv"
@@ -95,9 +103,7 @@ def _system_snapshot(df: pd.DataFrame, ts: float) -> dict:
     }
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # Trace helpers
-# ─────────────────────────────────────────────────────────────────────────────
 
 def _load_traces(exp_dir: Path) -> dict:
     path = exp_dir / "traces.json"
@@ -107,37 +113,8 @@ def _load_traces(exp_dir: Path) -> dict:
         return json.load(f)
 
 
-def _is_error_span(span: dict) -> bool:
-    for tag in span.get("tags", []):
-        k, v = tag.get("key"), tag.get("value")
-        if k == "otel.status_code" and str(v).upper() == "ERROR":
-            return True
-        if k == "error" and v is True:
-            return True
-    return False
-
-
 def _span_start_s(span: dict) -> float:
-    return span["startTime"] / 1_000_000   # microseconds → seconds
-
-
-def _span_end_s(span: dict) -> float:
-    return (_span_start_s(span) + span["duration"] / 1_000_000)
-
-
-def _root_duration_ms(trace: dict) -> float | None:
-    """Duration of the root span (no incoming references) in milliseconds."""
-    span_ids = {s["spanID"] for s in trace["spans"]}
-    referenced = {
-        ref["spanID"]
-        for s in trace["spans"]
-        for ref in s.get("references", [])
-        if ref.get("spanID") in span_ids
-    }
-    roots = [s for s in trace["spans"] if s["spanID"] not in referenced]
-    if not roots:
-        return None
-    return roots[0]["duration"] / 1000   # microseconds → milliseconds
+    return span["startTime"] / 1_000_000   # microseconds -> seconds
 
 
 def _max_depth(trace: dict) -> int:
@@ -160,66 +137,18 @@ def _max_depth(trace: dict) -> int:
     return max((depth(r) for r in roots), default=1)
 
 
-def _trace_features(traces: dict, service: str, t_start: float, t_end: float) -> dict:
-    """
-    Compute trace-derived features for a service over [t_start, t_end].
-    Window duration used to compute request_rate.
-    """
-    window_s = max(t_end - t_start, 1)
-    svc_traces = traces.get(service, [])
-
-    # Filter traces whose root span falls in the window
-    in_window = []
-    for trace in svc_traces:
-        for span in trace.get("spans", []):
-            ss = _span_start_s(span)
-            if t_start <= ss <= t_end:
-                in_window.append(trace)
-                break
-
-    if not in_window:
-        return {
-            "request_rate":   0.0,
-            "error_rate":     0.0,
-            "latency_mean_ms": None,
-            "max_trace_depth": 0,
-        }
-
-    total_spans = sum(len(t["spans"]) for t in in_window)
-    error_spans = sum(
-        1 for t in in_window for s in t["spans"] if _is_error_span(s)
-    )
-    durations = [d for t in in_window if (d := _root_duration_ms(t)) is not None]
-    depths    = [_max_depth(t) for t in in_window]
-
-    return {
-        "request_rate":    len(in_window) / window_s,
-        "error_rate":      error_spans / max(total_spans, 1),
-        "latency_mean_ms": sum(durations) / len(durations) if durations else None,
-        "max_trace_depth": max(depths, default=0),
-    }
+def _max_trace_depth(traces: dict, service: str, t_start: float, t_end: float) -> int:
+    """Deepest trace stored under `service` with a span in [t_start, t_end] (trace structure feature)."""
+    depths = [_max_depth(t) for t in traces.get(service, [])
+              if any(t_start <= _span_start_s(s) <= t_end for s in t.get("spans", []))]
+    return max(depths, default=0)
 
 
-def _blast_radius(traces: dict, target: str, t_start: float, t_end: float,
-                  baseline_latencies: dict, threshold: float = 0.10) -> int:
-    """
-    Count services (excluding target) whose mean latency increased by > threshold
-    compared to their baseline latency.
-    """
-    affected = 0
-    for svc, base_lat in baseline_latencies.items():
-        if svc == target or base_lat is None or base_lat == 0:
-            continue
-        feats = _trace_features(traces, svc, t_start, t_end)
-        lat = feats.get("latency_mean_ms")
-        if lat is not None and (lat - base_lat) / base_lat > threshold:
-            affected += 1
-    return affected
+def _latency_delta(lat: float | None, base_lat: float | None) -> float | None:
+    return (lat - base_lat) / base_lat if (lat is not None and base_lat is not None and base_lat > 0) else None
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # Severity label
-# ─────────────────────────────────────────────────────────────────────────────
 
 def _compute_severity(latency_delta: float | None, error_rate: float,
                       restart_count: float | None, replicas: float | None) -> str:
@@ -227,11 +156,10 @@ def _compute_severity(latency_delta: float | None, error_rate: float,
     Observation-based severity label derived entirely from runtime signals,
     not from fault configuration inputs.
 
-    Priority (highest to lowest):
-      1. replicas == 0        → service unavailable          → High
-      2. restart_count > 0    → pod crashed under this fault → High
-      3. error_rate thresholds → direct user-visible impact
-      4. latency_delta thresholds → relative degradation from baseline
+    Any High condition gives High, otherwise any Medium condition gives Medium, otherwise Low:
+      High:   replicas == 0, restart_count > 0, latency_delta > 1.0, error_rate > 5%
+      Medium: latency_delta > 0.2, error_rate > 1%
+    latency_delta is None when there were too few requests to judge it (see span_measures.py).
     """
     if (
         (replicas is not None and replicas == 0) or
@@ -250,15 +178,14 @@ def _compute_severity(latency_delta: float | None, error_rate: float,
     return "Low"
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # Per-experiment processing
-# ─────────────────────────────────────────────────────────────────────────────
 
-def process_experiment(exp_dir: Path) -> list[dict]:
+def process_experiment(exp_dir: Path) -> tuple[list[dict], dict | None]:
+    """-> (one row per snapshot T, one record of the measurements behind this run's labels)."""
     meta_path = exp_dir / "metadata.json"
     if not meta_path.exists():
         logger.warning("Skipping %s — no metadata.json", exp_dir.name)
-        return []
+        return [], None
 
     with open(meta_path) as f:
         meta = json.load(f)
@@ -281,38 +208,43 @@ def process_experiment(exp_dir: Path) -> list[dict]:
 
     prom   = _load_prometheus(exp_dir)
     traces = _load_traces(exp_dir)
+    spans  = parse_spans(traces)
+    reqs, source = target_view(spans, service)    # requests to the changed service (see span_measures)
+    base_win = (base_start, base_end)
 
-    # ── Baseline stats ────────────────────────────────────────────────────────
+    # Baseline stats
     base_prom  = _prom_baseline(prom, service, base_start, base_end)
-    base_feats = _trace_features(traces, service, base_start, base_end)
-    base_lat   = base_feats.get("latency_mean_ms")
+    base_feats = summary(window(reqs, *base_win), base_end - base_start)
+    base_lat   = base_feats["latency_mean_ms"]
 
-    # Baseline latency for ALL services (used for blast radius)
-    all_services = list(traces.keys())
-    base_latencies = {}
-    for svc in all_services:
-        bf = _trace_features(traces, svc, base_start, base_end)
-        base_latencies[svc] = bf.get("latency_mean_ms")
-
-    # ── Label window (last 60s of fault phase) ────────────────────────────────
+    # Label window (last 60s of fault phase)
     label_start  = max(fault_end - LABEL_WINDOW, fault_start)
-    final_feats  = _trace_features(traces, service, label_start, fault_end)
-    final_lat    = final_feats.get("latency_mean_ms")
-    final_lat_delta = (
-        (final_lat - base_lat) / base_lat
-        if (final_lat is not None and base_lat is not None and base_lat > 0)
-        else None
-    )
-    final_error_rate   = final_feats.get("error_rate", 0.0)
+    final_feats  = summary(window(reqs, label_start, fault_end), fault_end - label_start)
+    final_lat    = final_feats["latency_mean_ms"]
+    latency_measurable = enough_requests(base_feats["n"], final_feats["n"], alpha=SEVERITY_ALPHA)
+    final_lat_delta    = _latency_delta(final_lat, base_lat) if latency_measurable else None
+    final_error_rate   = final_feats["error_rate"]
     final_prom         = _prom_snapshot(prom, service, fault_end)
     final_restart      = final_prom.get("restart_count")
     final_replicas     = final_prom.get("replicas")
-    blast_radius_final = _blast_radius(traces, service, label_start, fault_end, base_latencies)
+    blast_final        = blast_radius(spans, service, base_win, (label_start, fault_end))
+    blast_radius_final = blast_final["count"]
     severity           = _compute_severity(
         final_lat_delta, final_error_rate, final_restart, final_replicas
     )
+    record = {
+        "experiment_id": meta["experiment_id"], "service": service, "fault_type": fault_type,
+        "fault_value": fault_value, "traffic_level": traffic, "target_source": source,
+        "n_base": base_feats["n"], "n_final": final_feats["n"], "latency_measurable": latency_measurable,
+        "base_latency_mean_ms": base_lat, "final_latency_mean_ms": final_lat,
+        "final_latency_delta": final_lat_delta, "final_error_rate": final_error_rate,
+        "final_restart_count": final_restart, "final_replicas": final_replicas, "severity": severity,
+        "blast_radius_final": blast_radius_final,
+        "blast_affected": ";".join(blast_final["affected"]),
+        "blast_unjudged": ";".join(blast_final["unjudged"]),
+    }
 
-    # ── One row per T ─────────────────────────────────────────────────────────
+    # One row per T
     rows = []
     for T in SNAPSHOT_OFFSETS:
         snap_time = fault_start + T
@@ -321,13 +253,14 @@ def process_experiment(exp_dir: Path) -> list[dict]:
 
         p_snap    = _prom_snapshot(prom, service, snap_time)
         sys_snap  = _system_snapshot(prom, snap_time)
-        t_feats   = _trace_features(traces, service, fault_start, snap_time)
+        # early-window features: whatever requests were seen so far (no minimum: they are evidence, not labels)
+        t_feats   = summary(window(reqs, fault_start, snap_time), T)
 
         cpu      = p_snap.get("cpu_usage")
         base_cpu = base_prom.get("baseline_cpu")
         mem      = p_snap.get("memory_bytes")
         base_mem = base_prom.get("baseline_memory")
-        lat      = t_feats.get("latency_mean_ms")
+        lat      = t_feats["latency_mean_ms"]
 
         rows.append({
             # Context
@@ -350,32 +283,24 @@ def process_experiment(exp_dir: Path) -> list[dict]:
             "system_memory_mean":    sys_snap.get("system_memory_mean"),
 
             # Trace features (early window only)
-            "target_request_rate":   t_feats.get("request_rate"),
-            "target_error_rate":     t_feats.get("error_rate"),
+            "target_request_rate":   t_feats["request_rate"],
+            "target_error_rate":     t_feats["error_rate"],
             "target_latency_mean_ms": lat,
-            "target_latency_delta":  (
-                (lat - base_lat) / base_lat
-                if (lat is not None and base_lat is not None and base_lat > 0)
-                else None
-            ),
-            "blast_radius_early":    _blast_radius(
-                traces, service, fault_start, snap_time, base_latencies
-            ),
-            "max_trace_depth":       t_feats.get("max_trace_depth"),
+            "target_latency_delta":  _latency_delta(lat, base_lat),
+            "blast_radius_early":    blast_radius(spans, service, base_win, (fault_start, snap_time))["count"],
+            "max_trace_depth":       _max_trace_depth(traces, service, fault_start, snap_time),
 
-            # Labels (from final window — same for all 4 rows of this experiment)
+            # Labels (from final window - same for all 4 rows of this experiment)
             "severity":              severity,
             "blast_radius_final":    blast_radius_final,
             "final_latency_delta":   final_lat_delta,
             "latency_observable":    service not in NO_TRACE_SERVICES,
         })
 
-    return rows
+    return rows, record
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # Main
-# ─────────────────────────────────────────────────────────────────────────────
 
 def main(raw_dir: Path, out_path: Path):
     exp_dirs = sorted(d for d in raw_dir.iterdir() if d.is_dir() and d.name.startswith("EXP_"))
@@ -383,12 +308,14 @@ def main(raw_dir: Path, out_path: Path):
         logger.error("No EXP_* directories found in %s", raw_dir)
         return
 
-    all_rows = []
+    all_rows, records = [], []
     for exp_dir in exp_dirs:
         logger.info("Processing %s", exp_dir.name)
         try:
-            rows = process_experiment(exp_dir)
+            rows, record = process_experiment(exp_dir)
             all_rows.extend(rows)
+            if record:
+                records.append(record)
             logger.info("  → %d rows", len(rows))
         except Exception as exc:
             logger.error("  FAILED: %s", exc)
@@ -400,9 +327,11 @@ def main(raw_dir: Path, out_path: Path):
     df = pd.DataFrame(all_rows)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     df.to_csv(out_path, index=False)
+    rec_path = out_path.parent / "label_measurements.csv"
+    pd.DataFrame(records).to_csv(rec_path, index=False)
     logger.info(
-        "Saved %d rows (%d experiments) → %s",
-        len(df), df["experiment_id"].nunique(), out_path,
+        "Saved %d rows (%d experiments) → %s   (label measurements → %s)",
+        len(df), df["experiment_id"].nunique(), out_path, rec_path.name,
     )
     logger.info("Severity distribution:\n%s", df["severity"].value_counts().to_string())
     logger.info("Fault type counts:\n%s", df.groupby("fault_type").size().to_string())

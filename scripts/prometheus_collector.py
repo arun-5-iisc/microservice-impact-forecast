@@ -1,17 +1,13 @@
 """
-Collects Tier 3 infrastructure metrics from Prometheus for all Online Boutique services.
+Collects the infrastructure metrics from Prometheus for all Online Boutique services.
 
 Metrics collected (per service, per 15-second step):
   cpu_usage     - CPU cores consumed (rate over 1m window)
   memory_bytes  - Working set memory in bytes
   replicas      - Available replica count
   restart_count - Total container restart count
-
-Application-level metrics (latency, error rate, request rate) are derived from
-Jaeger traces during preprocessing — not collected here.
-
-Note: Online Boutique containers are named "server" (not the service name), so
-queries filter by pod name prefix rather than container name.
+Online Boutique's containers are all named "server", so the queries filter on the pod name
+prefix rather than the container name.
 """
 import contextlib
 import logging

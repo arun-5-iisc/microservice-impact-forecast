@@ -1,0 +1,4 @@
+model,mae,rmse,r2
+XGBoost,0.2888,0.4804,0.7033
+EarlyBlastBaseline,0.405,0.6595,0.4406
+NoSpreadBaseline,0.68,1.1136,-0.5947

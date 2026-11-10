@@ -1,0 +1,7 @@
+split,subset,rows,experiments,model_accuracy,baseline_accuracy
+cv,all,776,194,0.8157,0.6598
+cv,changed_after_snapshot,264,90,0.6061,0.0
+cv,unchanged,512,158,0.9238,1.0
+holdout,all,200,50,0.815,0.69
+holdout,changed_after_snapshot,62,24,0.6935,0.0
+holdout,unchanged,138,42,0.8696,1.0

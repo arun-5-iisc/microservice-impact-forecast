@@ -1,19 +1,8 @@
 """
-Collects distributed traces from Jaeger for all Online Boutique services.
+Collects the Jaeger traces of all Online Boutique services for an experiment window.
 
-This is the primary data source for Tier 1 and Tier 2 features:
-  Tier 1 (derived during preprocessing):
-    - Request rate (span count per time window)
-    - Error rate (error spans / total spans)
-    - P50 / P95 / P99 latency (percentiles of root span durations)
-
-  Tier 2 (derived during preprocessing):
-    - Blast radius (number of distinct services in a trace)
-    - Dependency depth (maximum span depth in a trace)
-    - Critical path latency (longest chain of spans)
-    - Error propagation (which services have error spans)
-
-Raw traces are saved as-is. No preprocessing happens here.
+The traces are saved as they are. Latency, error rate and blast radius are measured from them
+later, by span_measures.py.
 """
 import contextlib
 import json

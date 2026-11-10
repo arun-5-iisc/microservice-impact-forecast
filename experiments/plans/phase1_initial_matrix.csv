@@ -1,0 +1,91 @@
+service,fault,value,traffic,run,group,purpose
+recommendationservice,cpu,150m,normal,1,initial,Initial matrix: CPU limit lowered
+recommendationservice,cpu,125m,normal,1,initial,Initial matrix: CPU limit lowered
+recommendationservice,cpu,100m,normal,1,initial,Initial matrix: CPU limit lowered
+productcatalogservice,cpu,150m,normal,1,initial,Initial matrix: CPU limit lowered
+productcatalogservice,cpu,125m,normal,1,initial,Initial matrix: CPU limit lowered
+productcatalogservice,cpu,100m,normal,1,initial,Initial matrix: CPU limit lowered
+checkoutservice,cpu,150m,normal,1,initial,Initial matrix: CPU limit lowered
+checkoutservice,cpu,125m,normal,1,initial,Initial matrix: CPU limit lowered
+checkoutservice,cpu,100m,normal,1,initial,Initial matrix: CPU limit lowered
+currencyservice,cpu,150m,normal,1,initial,Initial matrix: CPU limit lowered
+currencyservice,cpu,125m,normal,1,initial,Initial matrix: CPU limit lowered
+currencyservice,cpu,100m,normal,1,initial,Initial matrix: CPU limit lowered
+emailservice,cpu,150m,normal,1,initial,Initial matrix: CPU limit lowered
+emailservice,cpu,125m,normal,1,initial,Initial matrix: CPU limit lowered
+emailservice,cpu,100m,normal,1,initial,Initial matrix: CPU limit lowered
+frontend,cpu,150m,normal,1,initial,Initial matrix: CPU limit lowered
+frontend,cpu,125m,normal,1,initial,Initial matrix: CPU limit lowered
+frontend,cpu,100m,normal,1,initial,Initial matrix: CPU limit lowered
+paymentservice,cpu,150m,normal,1,initial,Initial matrix: CPU limit lowered
+paymentservice,cpu,125m,normal,1,initial,Initial matrix: CPU limit lowered
+paymentservice,cpu,100m,normal,1,initial,Initial matrix: CPU limit lowered
+shippingservice,cpu,150m,normal,1,initial,Initial matrix: CPU limit lowered
+shippingservice,cpu,125m,normal,1,initial,Initial matrix: CPU limit lowered
+shippingservice,cpu,100m,normal,1,initial,Initial matrix: CPU limit lowered
+adservice,cpu,275m,normal,1,initial,Initial matrix: CPU limit lowered
+adservice,cpu,250m,normal,1,initial,Initial matrix: CPU limit lowered
+adservice,cpu,200m,normal,1,initial,Initial matrix: CPU limit lowered
+cartservice,cpu,275m,normal,1,initial,Initial matrix: CPU limit lowered
+cartservice,cpu,250m,normal,1,initial,Initial matrix: CPU limit lowered
+cartservice,cpu,200m,normal,1,initial,Initial matrix: CPU limit lowered
+recommendationservice,memory,337Mi,normal,1,initial,Initial matrix: memory limit lowered (never below the request)
+recommendationservice,memory,225Mi,normal,1,initial,Initial matrix: memory limit lowered (never below the request)
+recommendationservice,memory,220Mi,normal,1,initial,Initial matrix: memory limit lowered (never below the request)
+productcatalogservice,memory,100Mi,normal,1,initial,Initial matrix: memory limit lowered (never below the request)
+productcatalogservice,memory,80Mi,normal,1,initial,Initial matrix: memory limit lowered (never below the request)
+productcatalogservice,memory,64Mi,normal,1,initial,Initial matrix: memory limit lowered (never below the request)
+checkoutservice,memory,100Mi,normal,1,initial,Initial matrix: memory limit lowered (never below the request)
+checkoutservice,memory,80Mi,normal,1,initial,Initial matrix: memory limit lowered (never below the request)
+checkoutservice,memory,64Mi,normal,1,initial,Initial matrix: memory limit lowered (never below the request)
+frontend,memory,100Mi,normal,1,initial,Initial matrix: memory limit lowered (never below the request)
+frontend,memory,80Mi,normal,1,initial,Initial matrix: memory limit lowered (never below the request)
+frontend,memory,64Mi,normal,1,initial,Initial matrix: memory limit lowered (never below the request)
+cartservice,memory,192Mi,normal,1,initial,Initial matrix: memory limit lowered (never below the request)
+cartservice,memory,160Mi,normal,1,initial,Initial matrix: memory limit lowered (never below the request)
+cartservice,memory,128Mi,normal,1,initial,Initial matrix: memory limit lowered (never below the request)
+adservice,memory,225Mi,normal,1,initial,Initial matrix: memory limit lowered (never below the request)
+adservice,memory,200Mi,normal,1,initial,Initial matrix: memory limit lowered (never below the request)
+adservice,memory,180Mi,normal,1,initial,Initial matrix: memory limit lowered (never below the request)
+recommendationservice,replicas,0,normal,1,initial,Initial matrix: scaled to 0 replicas
+productcatalogservice,replicas,0,normal,1,initial,Initial matrix: scaled to 0 replicas
+checkoutservice,replicas,0,normal,1,initial,Initial matrix: scaled to 0 replicas
+frontend,replicas,0,normal,1,initial,Initial matrix: scaled to 0 replicas
+cartservice,replicas,0,normal,1,initial,Initial matrix: scaled to 0 replicas
+paymentservice,replicas,0,normal,1,initial,Initial matrix: scaled to 0 replicas
+shippingservice,replicas,0,normal,1,initial,Initial matrix: scaled to 0 replicas
+currencyservice,replicas,0,normal,1,initial,Initial matrix: scaled to 0 replicas
+checkoutservice,latency,100,normal,1,initial,Initial matrix: network delay added
+checkoutservice,latency,200,normal,1,initial,Initial matrix: network delay added
+checkoutservice,latency,500,normal,1,initial,Initial matrix: network delay added
+checkoutservice,latency,1000,normal,1,initial,Initial matrix: network delay added
+frontend,latency,100,normal,1,initial,Initial matrix: network delay added
+frontend,latency,200,normal,1,initial,Initial matrix: network delay added
+frontend,latency,500,normal,1,initial,Initial matrix: network delay added
+frontend,latency,1000,normal,1,initial,Initial matrix: network delay added
+recommendationservice,latency,100,normal,1,initial,Initial matrix: network delay added
+recommendationservice,latency,200,normal,1,initial,Initial matrix: network delay added
+recommendationservice,latency,500,normal,1,initial,Initial matrix: network delay added
+recommendationservice,latency,1000,normal,1,initial,Initial matrix: network delay added
+productcatalogservice,latency,100,normal,1,initial,Initial matrix: network delay added
+productcatalogservice,latency,200,normal,1,initial,Initial matrix: network delay added
+productcatalogservice,latency,500,normal,1,initial,Initial matrix: network delay added
+productcatalogservice,latency,1000,normal,1,initial,Initial matrix: network delay added
+cartservice,latency,100,normal,1,initial,Initial matrix: network delay added
+cartservice,latency,200,normal,1,initial,Initial matrix: network delay added
+cartservice,latency,500,normal,1,initial,Initial matrix: network delay added
+cartservice,latency,1000,normal,1,initial,Initial matrix: network delay added
+checkoutservice,latency,500,high,1,initial,"Initial matrix: network delay added, high traffic"
+checkoutservice,latency,1000,high,1,initial,"Initial matrix: network delay added, high traffic"
+frontend,latency,500,high,1,initial,"Initial matrix: network delay added, high traffic"
+frontend,latency,1000,high,1,initial,"Initial matrix: network delay added, high traffic"
+productcatalogservice,latency,500,high,1,initial,"Initial matrix: network delay added, high traffic"
+productcatalogservice,latency,1000,high,1,initial,"Initial matrix: network delay added, high traffic"
+recommendationservice,cpu,125m,high,1,initial,"Initial matrix: CPU limit lowered, high traffic"
+recommendationservice,cpu,100m,high,1,initial,"Initial matrix: CPU limit lowered, high traffic"
+productcatalogservice,cpu,125m,high,1,initial,"Initial matrix: CPU limit lowered, high traffic"
+checkoutservice,cpu,100m,high,1,initial,"Initial matrix: CPU limit lowered, high traffic"
+frontend,cpu,100m,high,1,initial,"Initial matrix: CPU limit lowered, high traffic"
+recommendationservice,replicas,0,high,1,initial,"Initial matrix: scaled to 0 replicas, high traffic"
+productcatalogservice,replicas,0,high,1,initial,"Initial matrix: scaled to 0 replicas, high traffic"
+checkoutservice,replicas,0,high,1,initial,"Initial matrix: scaled to 0 replicas, high traffic"

@@ -1,0 +1,9 @@
+model,time_into_fault_s,accuracy,macro_f1
+XGBoost,15,0.7938,0.6692
+FullRuleBaseline,15,0.701,0.4963
+XGBoost,30,0.8196,0.6832
+FullRuleBaseline,30,0.6701,0.4577
+XGBoost,45,0.8299,0.6923
+FullRuleBaseline,45,0.6289,0.3376
+XGBoost,60,0.8196,0.6645
+FullRuleBaseline,60,0.6392,0.3416

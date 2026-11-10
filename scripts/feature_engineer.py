@@ -1,24 +1,20 @@
 """
-Feature engineering layer — reads the baseline training dataset and produces an
-enriched version with four groups of new features.
+Feature engineering: adds four groups of features to the base training dataset.
 
-Reads:  dataset/processed/training_dataset.csv    (output of preprocess.py)
+Reads:  dataset/processed/training_dataset.csv    (from preprocess.py)
 Writes: dataset/processed/training_dataset_fe.csv
 
-Feature groups added
-────────────────────
-1. Service topology      — structural position in the Online Boutique call graph
-                           (service_depth, service_downstream_count,
-                            service_upstream_count, service_is_gateway)
-2. Fault severity ratio  — fault magnitude normalised by original resource limit
-                           (fault_severity_ratio)
-3. Log transforms        — log1p of skewed numerical features
-                           (log_target_latency_mean_ms, log_target_memory_bytes,
-                            log_fault_value_numeric)
-4. System trace aggregates — cross-service error / latency signals
-                           (system_error_rate, system_latency_ratio)
-                           NOTE: these require the raw trace data; if not
-                           computable they are filled with NaN (imputer handles them).
+1. Service topology      where the service sits in the Online Boutique call graph
+                         (service_depth, service_downstream_count, service_upstream_count,
+                         service_is_gateway)
+2. Fault severity ratio  size of the change relative to the original limit (fault_severity_ratio)
+3. Log transforms        log1p of skewed features (log_target_latency_mean_ms,
+                         log_target_memory_bytes, log_fault_value_numeric) and a signed log of
+                         the latency delta
+4. System aggregates     error rate and latency ratio across all services (system_error_rate,
+                         system_latency_ratio), measured with span_measures.py like the labels.
+                         They need the raw traces; runs without them get NaN, which the
+                         imputer in the training pipeline fills.
 
 Usage:
   python scripts/feature_engineer.py
@@ -33,6 +29,8 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from span_measures import load_run_spans, system_aggregates
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s  %(levelname)-8s  %(message)s",
@@ -46,34 +44,40 @@ DEFAULT_OUT  = REPO_ROOT / "dataset" / "processed" / "training_dataset_fe.csv"
 RAW_DIR      = REPO_ROOT / "dataset" / "raw"
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Static domain knowledge
-# ─────────────────────────────────────────────────────────────────────────────
-
-# Online Boutique call graph — verified from Jaeger traces across 4 experiments
-# downstream_count (fan-out): internal services this service calls
-# upstream_count   (fan-in):  internal services that call this service
-#
-# Confirmed edges:
-#   frontend          → adservice, cartservice, checkoutservice, currencyservice,
-#                        productcatalogservice, recommendationservice, shippingservice (7)
-#   checkoutservice   → cartservice, emailservice, paymentservice,
-#                        productcatalogservice, shippingservice (5)
-#   recommendationservice → (none visible in any trace — calls nothing internally)
-#   cartservice           → (none — calls Redis which is external/untraced)
-SERVICE_TOPOLOGY = {
-    #                              depth  fan_out  fan_in  gateway
-    "frontend":              {"depth": 1, "downstream_count": 7, "upstream_count": 0, "is_gateway": 1},
-    "checkoutservice":       {"depth": 2, "downstream_count": 5, "upstream_count": 1, "is_gateway": 0},
-    "recommendationservice": {"depth": 2, "downstream_count": 0, "upstream_count": 1, "is_gateway": 0},
-    "productcatalogservice": {"depth": 2, "downstream_count": 0, "upstream_count": 2, "is_gateway": 0},
-    "cartservice":           {"depth": 2, "downstream_count": 0, "upstream_count": 2, "is_gateway": 0},
-    "paymentservice":        {"depth": 3, "downstream_count": 0, "upstream_count": 1, "is_gateway": 0},
-    "emailservice":          {"depth": 3, "downstream_count": 0, "upstream_count": 1, "is_gateway": 0},
-    "shippingservice":       {"depth": 3, "downstream_count": 0, "upstream_count": 2, "is_gateway": 0},
-    "currencyservice":       {"depth": 3, "downstream_count": 0, "upstream_count": 1, "is_gateway": 0},
-    "adservice":             {"depth": 1, "downstream_count": 0, "upstream_count": 1, "is_gateway": 0},
+# Online Boutique call graph, checked against parent/child spans in the recorded traces (same graph
+# as genai/replay.py). cartservice also calls Redis, which is outside the app and not traced.
+CALL_GRAPH = {
+    "frontend":              ["adservice", "cartservice", "checkoutservice", "currencyservice",
+                              "productcatalogservice", "recommendationservice", "shippingservice"],
+    "checkoutservice":       ["cartservice", "currencyservice", "emailservice", "paymentservice",
+                              "productcatalogservice", "shippingservice"],
+    "recommendationservice": ["productcatalogservice"],
+    "adservice": [], "cartservice": [], "currencyservice": [], "emailservice": [],
+    "paymentservice": [], "productcatalogservice": [], "shippingservice": [],
 }
+
+
+def _topology(graph: dict, entry: str = "frontend") -> dict:
+    """
+    Per service, computed from the call graph (not typed by hand):
+      depth             position on the shortest call path from the entry point (frontend = 1)
+      downstream_count  services it calls (fan-out)
+      upstream_count    services that call it (fan-in)
+      is_gateway        1 for the entry point that receives user traffic
+    """
+    depth, queue = {entry: 1}, [entry]
+    while queue:
+        svc = queue.pop(0)
+        for callee in graph[svc]:
+            if callee not in depth:
+                depth[callee] = depth[svc] + 1
+                queue.append(callee)
+    return {svc: {"depth": depth[svc], "downstream_count": len(callees),
+                  "upstream_count": sum(svc in c for c in graph.values()), "is_gateway": int(svc == entry)}
+            for svc, callees in graph.items()}
+
+
+SERVICE_TOPOLOGY = _topology(CALL_GRAPH)
 
 # Original Helm resource limits per service
 # CPU in millicores (m), memory in MiB
@@ -86,14 +90,12 @@ ORIGINAL_LIMITS = {
     "adservice":             {"cpu": 300,  "memory": 300},
     "currencyservice":       {"cpu": 200,  "memory": 256},
     "emailservice":          {"cpu": 200,  "memory": 128},
-    "paymentservice":        {"cpu": 200,  "memory": 128},
+    "paymentservice":        {"cpu": 200,  "memory": 256},
     "shippingservice":       {"cpu": 200,  "memory": 128},
 }
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # Feature 1: Service topology
-# ─────────────────────────────────────────────────────────────────────────────
 
 def add_topology_features(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
@@ -107,9 +109,7 @@ def add_topology_features(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # Feature 2: Fault severity ratio
-# ─────────────────────────────────────────────────────────────────────────────
 
 def _fault_severity_ratio(row) -> float | None:
     svc        = row["service"]
@@ -128,14 +128,14 @@ def _fault_severity_ratio(row) -> float | None:
     elif fault_type == "memory":
         original = limits.get("memory")
         if original:
-            # fault_value_numeric is in Mi (strip from string "128Mi" → 128)
+            # fault_value_numeric is in Mi (strip from string "128Mi" to 128)
             return 1.0 - fval / original
     elif fault_type == "latency":
-        # Normalise to [0, 1]: 1000ms → ratio=1.0 (severe), 100ms → 0.1
+        # Normalise to [0, 1]: 1000ms toratio=1.0 (severe), 100ms to 0.1
         return min(fval / 1000.0, 1.0)
     elif fault_type == "replicas":
-        # 0 replicas → ratio=1.0 (complete outage)
-        return 1.0 - fval   # fval=0 → 1.0
+        # 0 replicas , ratio=1.0 (complete outage)
+        return 1.0 - fval   # fval=0 to 1.0
 
     return None
 
@@ -146,15 +146,12 @@ def add_fault_severity_ratio(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # Feature 3: Log transforms on skewed features
-# ─────────────────────────────────────────────────────────────────────────────
 
 def add_log_transforms(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
-    # Leave NaN as NaN — the median imputer in the training pipeline handles them.
-    # fillna(0) before log1p would create log1p(0)=0 which is indistinguishable from
-    # real zero values and introduces spurious signal for missing observations.
+    # NaN stays NaN for the median imputer. Filling with 0 first would make a missing value
+    # look like a real zero.
     df["log_target_latency_mean_ms"] = df["target_latency_mean_ms"].apply(
         lambda x: np.log1p(x) if pd.notna(x) else np.nan
     )
@@ -164,158 +161,50 @@ def add_log_transforms(df: pd.DataFrame) -> pd.DataFrame:
     df["log_fault_value_numeric"] = df["fault_value_numeric"].apply(
         lambda x: np.log1p(x) if pd.notna(x) else np.nan
     )
-    # Signed log of latency delta — compresses extreme High outliers (mean=93, median=28)
-    # while preserving sign (negative delta = latency improved vs baseline).
-    # target_latency_delta can be negative so log1p alone is insufficient.
+    # The latency delta can be negative (faster than baseline), so log1p alone won't do:
+    # sign(x) * log1p(|x|) squashes the very large High values and keeps the sign.
     df["signed_log_latency_delta"] = df["target_latency_delta"].apply(
         lambda x: np.sign(x) * np.log1p(abs(x)) if pd.notna(x) else np.nan
     )
     return df
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # Feature 4: System-level trace aggregates from raw data
-# ─────────────────────────────────────────────────────────────────────────────
 
-def _load_traces(exp_dir: Path) -> dict:
-    path = exp_dir / "traces.json"
-    if not path.exists():
-        return {}
-    with open(path) as f:
-        return json.load(f)
-
-
-def _span_start_s(span: dict) -> float:
-    return span["startTime"] / 1_000_000
-
-
-def _is_error_span(span: dict) -> bool:
-    for tag in span.get("tags", []):
-        k, v = tag.get("key"), tag.get("value")
-        if k == "otel.status_code" and str(v).upper() == "ERROR":
-            return True
-        if k == "error" and v is True:
-            return True
-    return False
-
-
-def _root_duration_ms(trace: dict) -> float | None:
-    span_ids   = {s["spanID"] for s in trace["spans"]}
-    referenced = {
-        ref["spanID"]
-        for s in trace["spans"]
-        for ref in s.get("references", [])
-        if ref.get("spanID") in span_ids
-    }
-    roots = [s for s in trace["spans"] if s["spanID"] not in referenced]
-    if not roots:
-        return None
-    return roots[0]["duration"] / 1000
-
-
-def _svc_error_rate(traces: dict, svc: str, t_start: float, t_end: float) -> float | None:
-    svc_traces = traces.get(svc, [])
-    in_window  = [
-        t for t in svc_traces
-        if any(t_start <= _span_start_s(s) <= t_end for s in t.get("spans", []))
-    ]
-    if not in_window:
-        return None
-    total  = sum(len(t["spans"]) for t in in_window)
-    errors = sum(1 for t in in_window for s in t["spans"] if _is_error_span(s))
-    return errors / max(total, 1)
-
-
-def _svc_latency_mean(traces: dict, svc: str, t_start: float, t_end: float) -> float | None:
-    svc_traces = traces.get(svc, [])
-    in_window  = [
-        t for t in svc_traces
-        if any(t_start <= _span_start_s(s) <= t_end for s in t.get("spans", []))
-    ]
-    if not in_window:
-        return None
-    durations = [d for t in in_window if (d := _root_duration_ms(t)) is not None]
-    return sum(durations) / len(durations) if durations else None
-
-
-def _compute_system_trace_aggregates(exp_dir: Path, fault_start: float, snap_time: float) -> dict:
+def _system_aggregates_for_run(exp_dir: Path, service: str, offsets) -> dict:
     """
-    Compute mean error rate and latency ratio across ALL services in the early
-    fault window [fault_start, snap_time].
-    Returns system_error_rate and system_latency_ratio (vs. baseline).
+    system_error_rate / system_latency_ratio at each snapshot T, for one run: mean error rate and
+    mean latency ratio (early window [fault start, fault start + T] vs baseline) across all services,
+    measured as in span_measures.py (changed service from its callers, others from their own spans).
     """
-    traces = _load_traces(exp_dir)
-    if not traces:
-        return {"system_error_rate": None, "system_latency_ratio": None}
-
     meta_path = exp_dir / "metadata.json"
-    if not meta_path.exists():
-        return {"system_error_rate": None, "system_latency_ratio": None}
-    with open(meta_path) as f:
-        meta = json.load(f)
-    base_start = meta["phases"]["baseline"]["start"]
-    base_end   = meta["phases"]["baseline"]["end"]
-
-    error_rates     = []
-    latency_ratios  = []
-
-    for svc in traces:
-        er = _svc_error_rate(traces, svc, fault_start, snap_time)
-        if er is not None:
-            error_rates.append(er)
-
-        fault_lat   = _svc_latency_mean(traces, svc, fault_start, snap_time)
-        baseline_lat = _svc_latency_mean(traces, svc, base_start, base_end)
-        if fault_lat is not None and baseline_lat and baseline_lat > 0:
-            latency_ratios.append(fault_lat / baseline_lat)
-
-    return {
-        "system_error_rate":    np.mean(error_rates)   if error_rates    else None,
-        "system_latency_ratio": np.mean(latency_ratios) if latency_ratios else None,
-    }
+    if not meta_path.exists() or not (exp_dir / "traces.json").exists():
+        return {T: {"system_error_rate": None, "system_latency_ratio": None} for T in offsets}
+    meta = json.loads(meta_path.read_text())
+    ph = meta["phases"]
+    spans = load_run_spans(exp_dir)
+    base = (ph["baseline"]["start"], ph["baseline"]["end"])
+    fault_start = ph["fault"]["start"]
+    return {T: system_aggregates(spans, service, base, (fault_start, fault_start + T)) for T in offsets}
 
 
 def add_system_trace_aggregates(df: pd.DataFrame) -> pd.DataFrame:
     """
     Compute system_error_rate and system_latency_ratio for every row.
-    Reads raw trace files from RAW_DIR. Skipped rows get NaN.
+    Reads each run's raw traces once. Runs without raw data get NaN.
     """
     df = df.copy()
-    sys_error_rates    = []
-    sys_latency_ratios = []
-
-    # Cache per (experiment_id, time_into_fault_s) to avoid re-reading traces
-    cache: dict[tuple, dict] = {}
-
-    for _, row in df.iterrows():
-        exp_id  = row["experiment_id"]
-        T       = row["time_into_fault_s"]
-        key     = (exp_id, T)
-
-        if key not in cache:
-            exp_dir = RAW_DIR / exp_id
-            meta_path = exp_dir / "metadata.json"
-            if meta_path.exists():
-                with open(meta_path) as f:
-                    meta = json.load(f)
-                fault_start = meta["phases"]["fault"]["start"]
-                snap_time   = fault_start + T
-                cache[key]  = _compute_system_trace_aggregates(exp_dir, fault_start, snap_time)
-            else:
-                cache[key] = {"system_error_rate": None, "system_latency_ratio": None}
-
-        result = cache[key]
-        sys_error_rates.append(result["system_error_rate"])
-        sys_latency_ratios.append(result["system_latency_ratio"])
-
-    df["system_error_rate"]    = sys_error_rates
-    df["system_latency_ratio"] = sys_latency_ratios
+    values: dict[tuple, dict] = {}
+    for (exp_id, service), g in df.groupby(["experiment_id", "service"], sort=False):
+        per_t = _system_aggregates_for_run(RAW_DIR / exp_id, service, sorted(g["time_into_fault_s"].unique()))
+        values.update({(exp_id, T): v for T, v in per_t.items()})
+    keys = list(zip(df["experiment_id"], df["time_into_fault_s"]))
+    df["system_error_rate"]    = [values[k]["system_error_rate"] for k in keys]
+    df["system_latency_ratio"] = [values[k]["system_latency_ratio"] for k in keys]
     return df
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # Main
-# ─────────────────────────────────────────────────────────────────────────────
 
 def main(in_path: Path, out_path: Path):
     logger.info("Loading baseline dataset from %s", in_path)
@@ -323,19 +212,15 @@ def main(in_path: Path, out_path: Path):
     n_start = len(df)
     logger.info("Loaded %d rows, %d experiments", n_start, df["experiment_id"].nunique())
 
-    # Feature group 1: topology
     logger.info("Adding topology features…")
     df = add_topology_features(df)
 
-    # Feature group 2: fault severity ratio
     logger.info("Adding fault severity ratio…")
     df = add_fault_severity_ratio(df)
 
-    # Feature group 3: log transforms
     logger.info("Adding log transforms…")
     df = add_log_transforms(df)
 
-    # Feature group 4: system trace aggregates (reads raw data)
     if RAW_DIR.exists():
         logger.info("Adding system trace aggregates (reads raw traces — may take a moment)…")
         df = add_system_trace_aggregates(df)

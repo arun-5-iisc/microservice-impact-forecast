@@ -1,0 +1,3 @@
+model,accuracy,macro_f1,Low_f1,Medium_f1,High_f1
+XGBoost,0.815,0.6729,0.8155,0.28,0.9231
+FullRuleBaseline,0.69,0.4731,0.4051,0.1935,0.8207

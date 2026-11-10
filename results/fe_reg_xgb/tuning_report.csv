@@ -1,0 +1,2 @@
+model,task,metric,baseline,tuned,improvement_pct,n_trials
+XGBoost,regression,mae,0.2684,0.2481,7.6,50

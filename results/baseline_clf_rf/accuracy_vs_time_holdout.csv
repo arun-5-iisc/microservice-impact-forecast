@@ -1,0 +1,9 @@
+model,time_into_fault_s,accuracy,macro_f1
+RandomForest,15,0.8,0.665
+FullRuleBaseline,15,0.68,0.5938
+RandomForest,30,0.78,0.6449
+FullRuleBaseline,30,0.66,0.4116
+RandomForest,45,0.82,0.6811
+FullRuleBaseline,45,0.72,0.4154
+RandomForest,60,0.84,0.7396
+FullRuleBaseline,60,0.7,0.4074

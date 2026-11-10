@@ -1,0 +1,7 @@
+split,task,model,mae,rmse,r2
+cv,blast_radius,RandomForest,0.2606,0.4342,
+cv,blast_radius,EarlyBlastBaseline,0.3155,0.6017,
+cv,blast_radius,NoSpreadBaseline,0.5252,0.995,
+holdout,blast_radius,RandomForest,0.2904,0.4333,0.7585
+holdout,blast_radius,EarlyBlastBaseline,0.405,0.6595,0.4406
+holdout,blast_radius,NoSpreadBaseline,0.68,1.1136,-0.5947

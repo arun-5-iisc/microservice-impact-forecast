@@ -1,0 +1,13 @@
+model,time_into_fault_s,mae,rmse
+RandomForest,15,0.3455,0.508
+EarlyBlastBaseline,15,0.58,0.8367
+NoSpreadBaseline,15,0.68,1.1136
+RandomForest,30,0.2933,0.4325
+EarlyBlastBaseline,30,0.44,0.6633
+NoSpreadBaseline,30,0.68,1.1136
+RandomForest,45,0.2566,0.3874
+EarlyBlastBaseline,45,0.32,0.5657
+NoSpreadBaseline,45,0.68,1.1136
+RandomForest,60,0.2662,0.3948
+EarlyBlastBaseline,60,0.28,0.5292
+NoSpreadBaseline,60,0.68,1.1136

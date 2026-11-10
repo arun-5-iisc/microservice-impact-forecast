@@ -1,0 +1,5 @@
+split,task,model,accuracy,macro_f1,Low_f1,Medium_f1,High_f1
+cv,severity,XGBoost,0.8157,0.6825,0.7623,0.3444,0.9408
+cv,severity,FullRuleBaseline,0.6598,0.423,0.3887,0.0804,0.8
+holdout,severity,XGBoost,0.815,0.6729,0.8155,0.28,0.9231
+holdout,severity,FullRuleBaseline,0.69,0.4731,0.4051,0.1935,0.8207

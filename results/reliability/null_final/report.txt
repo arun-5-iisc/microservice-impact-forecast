@@ -1,0 +1,12 @@
+Reproduction check: the label-window blast radius equals the stored label for all 244 runs. OK
+
+Mean services counted as affected, 30 s vs 30 s (final measurement):
+            null  signal
+fault_type              
+cpu         0.01    0.03
+latency     0.01    0.80
+memory      0.02    0.04
+replicas    0.00    0.80
+ALL         0.01    0.43
+
+With no change: 3 services flagged in 3 of 244 runs.

@@ -1,19 +1,20 @@
 """
-Generate dissertation-quality visualizations for the three-stage ML pipeline.
+Result figures for the report and slides.
 
 Reads from results/ and saves all plots to results/plots/.
 
 Figures:
-  01_stage_progression.png    — accuracy / macro-F1 / Medium-F1 across pipeline stages
-  02_per_class_f1_heatmap.png — F1 heatmap: model × severity class, coloured by stage
-  03_feature_importance.png   — top-15 features from best classifier (RF on FE)
-  04_accuracy_vs_time.png     — proactive accuracy at T=15,30,45,60s across stages
-  05_blast_radius_mae.png     — regression MAE across all models × stages
-  06_full_model_comparison.png — grouped bars: accuracy + macro-F1 for all models × stages
-  07_confusion_matrices.png   — OOF confusion matrices for tuned classifier(s)
-  08_holdout_comparison.png   — CV vs holdout for winning clf (XGBoost) and reg (RF)
-  09_optuna_convergence.png   — Bayesian search trial values + best-so-far curves
-  10_actual_vs_predicted.png  — true vs predicted blast radius on holdout, coloured by severity
+  01_stage_progression.png    - accuracy / macro-F1 / Medium-F1 across pipeline stages
+  02_per_class_f1_heatmap.png - F1 heatmap: model x severity class, coloured by stage
+  03_feature_importance.png   - top-15 features of the untuned random forest classifier on FE features
+  04_accuracy_vs_time.png     - proactive OOF accuracy at T=15,30,45,60s, tuned RF vs XGBoost (clf)
+  05_blast_radius_mae.png     - regression MAE across all models x stages
+  06_full_model_comparison.png - grouped bars: accuracy + macro-F1 for all models x stages
+  07_confusion_matrices.png   - OOF confusion matrices for tuned classifier(s)
+  08_holdout_comparison.png   - CV vs holdout for the chosen classifier and regressor
+  09_optuna_convergence.png   - Bayesian search trial values + best-so-far curves
+  10_actual_vs_predicted.png  - true vs predicted blast radius on holdout, coloured by severity
+  11_mae_vs_time.png          - proactive OOF MAE at T=15,30,45,60s, tuned RF vs XGBoost (reg)
 
 Usage:
   python scripts/visualize.py
@@ -44,7 +45,7 @@ REPO_ROOT    = Path(__file__).parent.parent
 DEFAULT_RES  = REPO_ROOT / "results"
 DEFAULT_OUT  = REPO_ROOT / "results" / "plots"
 
-# ── Shared style ──────────────────────────────────────────────────────────────
+# Shared style
 STAGE_ORDER  = ["baseline", "fe", "fe_tuned"]
 STAGE_LABELS = {"baseline": "Baseline", "fe": "Feature\nEngineering", "fe_tuned": "Tuned (FE)"}
 STAGE_COLORS = {"baseline": "#4C72B0", "fe": "#DD8452", "fe_tuned": "#55A868"}
@@ -89,13 +90,11 @@ def _load(res_dir: Path, filename: str) -> pd.DataFrame | None:
     return pd.read_csv(path)
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # Figure 1: Stage progression (best model per stage)
-# ─────────────────────────────────────────────────────────────────────────────
 
 def plot_stage_progression(df: pd.DataFrame, out_dir: Path, fmt: str):
     """
-    Line chart: accuracy, macro-F1, Medium-F1 across baseline → FE → tuned.
+    Line chart: accuracy, macro-F1, Medium-F1 across baseline -> FE -> tuned.
     Uses the BEST model per stage (highest macro-F1).
     """
     best = (
@@ -139,9 +138,7 @@ def plot_stage_progression(df: pd.DataFrame, out_dir: Path, fmt: str):
     _save(fig, out_dir, "01_stage_progression", fmt)
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # Figure 2: Per-class F1 heatmap
-# ─────────────────────────────────────────────────────────────────────────────
 
 def plot_f1_heatmap(df: pd.DataFrame, out_dir: Path, fmt: str):
     """
@@ -172,9 +169,7 @@ def plot_f1_heatmap(df: pd.DataFrame, out_dir: Path, fmt: str):
     _save(fig, out_dir, "02_per_class_f1_heatmap", fmt)
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # Figure 3: Feature importance
-# ─────────────────────────────────────────────────────────────────────────────
 
 # Feature categories for colour coding
 _FE_FEATURES = {
@@ -218,60 +213,103 @@ def plot_feature_importance(df: pd.DataFrame, out_dir: Path, fmt: str, top_n: in
     _save(fig, out_dir, "03_feature_importance", fmt)
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # Figure 4: Accuracy vs time-into-fault
-# ─────────────────────────────────────────────────────────────────────────────
 
-def plot_accuracy_vs_time(baseline_t: pd.DataFrame | None, tuned_t: pd.DataFrame | None,
-                          out_dir: Path, fmt: str):
+def _plot_baseline_line(ax, df: pd.DataFrame, model: str, metric: str, T_vals: list, label: str,
+                        linestyle: str = "--"):
+    """Grey line for a no-ML baseline, if its rows are present (results from tune_model.py)."""
+    bdf = df[df["model"] == model]
+    if bdf.empty:
+        return
+    vals = [bdf.loc[bdf["time_into_fault_s"] == T, metric].values[0]
+            if T in bdf["time_into_fault_s"].values else np.nan for T in T_vals]
+    ax.plot(T_vals, vals, marker="o", linewidth=1.5, linestyle=linestyle, color="#7F7F7F", label=label)
+
+
+def plot_accuracy_vs_time(tuned_t: pd.DataFrame | None, out_dir: Path, fmt: str,
+                          source: str = "Holdout"):
     """
-    Line chart: proactive accuracy at T=15,30,45,60s.
-    baseline_t = accuracy_vs_time.csv (LightGBM OOF from train_model.py)
-    tuned_t    = accuracy_vs_time_tuned.csv (RF + LightGBM tuned from tune_model.py)
+    Accuracy at T = 15, 30, 45, 60 s for the two tuned classifiers (random forest, XGBoost).
+    source is "Holdout" (the 50 held-out runs, preferred) or "OOF" (out-of-fold on the
+    training runs, if the holdout files are missing); it is shown in the title so the two
+    can't be mixed up.
+    tuned_t = concatenation of accuracy_vs_time_{holdout,tuned}.csv from
+              results/baseline_clf_rf/ and results/baseline_clf_xgb/.
     """
-    if baseline_t is None and tuned_t is None:
+    if tuned_t is None:
         logger.warning("No time-into-fault data found — skipping figure 4")
         return
 
     fig, ax = plt.subplots(figsize=(7, 4.5))
     T_vals = [15, 30, 45, 60]
 
-    if baseline_t is not None:
-        vals = [baseline_t.loc[baseline_t["time_into_fault_s"] == T, "accuracy"]
-                          .values[0] if T in baseline_t["time_into_fault_s"].values else np.nan
+    for model, color in [
+        ("RandomForest", "#4C72B0"),
+        ("XGBoost",      "#DD8452"),
+    ]:
+        mdf = tuned_t[tuned_t["model"] == model]
+        if mdf.empty:
+            continue
+        vals = [mdf.loc[mdf["time_into_fault_s"] == T, "accuracy"]
+                   .values[0] if T in mdf["time_into_fault_s"].values else np.nan
                 for T in T_vals]
-        ax.plot(T_vals, vals, marker="o", linewidth=2, color="#4C72B0",
-                label="FE default – LightGBM", linestyle="--")
-
-    if tuned_t is not None:
-        for model, color, ls in [
-            ("RandomForest", "#DD8452", "-"),
-            ("LightGBM",     "#55A868", "-"),
-        ]:
-            mdf = tuned_t[tuned_t["model"] == model]
-            if mdf.empty:
-                continue
-            vals = [mdf.loc[mdf["time_into_fault_s"] == T, "accuracy"]
-                       .values[0] if T in mdf["time_into_fault_s"].values else np.nan
-                    for T in T_vals]
-            ax.plot(T_vals, vals, marker="s", linewidth=2, color=color,
-                    label=f"Tuned – {model}", linestyle=ls)
+        ax.plot(T_vals, vals, marker="s", linewidth=2, color=color,
+                label=f"Tuned – {model}")
+    _plot_baseline_line(ax, tuned_t, "FullRuleBaseline", "accuracy", T_vals,
+                        "Full-rule baseline (no ML)")
 
     ax.set_xticks(T_vals)
     ax.set_xticklabels([f"T={t}s" for t in T_vals])
     ax.set_ylim(0.5, 1.0)
-    ax.set_ylabel("OOF Accuracy")
+    ax.set_ylabel(f"{source} Accuracy")
     ax.set_xlabel("Seconds into Fault Phase (Proactive Window)")
-    ax.set_title("Proactive Accuracy vs Time into Fault")
+    ax.set_title(f"Proactive Accuracy vs Time into Fault — Tuned Classifiers ({source})")
     ax.legend()
-    ax.axhline(0.758, color="#4C72B0", linewidth=0.8, linestyle=":", alpha=0.5,
-               label="Baseline overall acc.")
     _save(fig, out_dir, "04_accuracy_vs_time", fmt)
 
 
-# ─────────────────────────────────────────────────────────────────────────────
+def plot_mae_vs_time(mae_t: pd.DataFrame | None, out_dir: Path, fmt: str,
+                     source: str = "Holdout"):
+    """
+    MAE at T = 15, 30, 45, 60 s for the two tuned regressors (random forest, XGBoost).
+    source is "Holdout" (preferred) or "OOF" (fallback), as in plot_accuracy_vs_time.
+    mae_t = concatenation of mae_vs_time_{holdout,tuned}.csv from
+            results/fe_reg_rf/ and results/fe_reg_xgb/.
+    """
+    if mae_t is None:
+        logger.warning("No regression time-into-fault data found — skipping figure 11")
+        return
+
+    fig, ax = plt.subplots(figsize=(7, 4.5))
+    T_vals = [15, 30, 45, 60]
+
+    for model, color in [
+        ("RandomForest", "#4C72B0"),
+        ("XGBoost",      "#DD8452"),
+    ]:
+        mdf = mae_t[mae_t["model"] == model]
+        if mdf.empty:
+            continue
+        vals = [mdf.loc[mdf["time_into_fault_s"] == T, "mae"]
+                   .values[0] if T in mdf["time_into_fault_s"].values else np.nan
+                for T in T_vals]
+        ax.plot(T_vals, vals, marker="s", linewidth=2, color=color,
+                label=f"Tuned – {model}")
+    _plot_baseline_line(ax, mae_t, "EarlyBlastBaseline", "mae", T_vals,
+                        '"final = early" baseline (no ML)')
+    _plot_baseline_line(ax, mae_t, "NoSpreadBaseline", "mae", T_vals,
+                        '"always 0" baseline (no ML)', linestyle=":")
+
+    ax.set_xticks(T_vals)
+    ax.set_xlabel("Seconds into Fault Phase (Proactive Window)")
+    ax.set_xticklabels([f"T={t}s" for t in T_vals])
+    ax.set_ylabel(f"{source} MAE (services)")
+    ax.set_title(f"Proactive Blast-Radius MAE vs Time into Fault — Tuned Regressors ({source})")
+    ax.legend()
+    _save(fig, out_dir, "11_mae_vs_time", fmt)
+
+
 # Figure 5: Blast radius MAE comparison
-# ─────────────────────────────────────────────────────────────────────────────
 
 def plot_blast_radius_mae(df: pd.DataFrame, out_dir: Path, fmt: str):
     stages  = [s for s in STAGE_ORDER if s in df["stage"].values]
@@ -300,14 +338,12 @@ def plot_blast_radius_mae(df: pd.DataFrame, out_dir: Path, fmt: str):
     _save(fig, out_dir, "05_blast_radius_mae", fmt)
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # Figure 6: Full model comparison (accuracy + macro-F1)
-# ─────────────────────────────────────────────────────────────────────────────
 
 def plot_full_model_comparison(df: pd.DataFrame, out_dir: Path, fmt: str):
     """
     Side-by-side grouped bars: accuracy (left) and macro-F1 (right) for all
-    model × stage combinations.
+    model x stage combinations.
     """
     stages = [s for s in STAGE_ORDER if s in df["stage"].values]
     models = sorted(df["model"].unique())
@@ -345,9 +381,7 @@ def plot_full_model_comparison(df: pd.DataFrame, out_dir: Path, fmt: str):
     _save(fig, out_dir, "06_full_model_comparison", fmt)
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # Figure 7: Confusion matrices for tuned models
-# ─────────────────────────────────────────────────────────────────────────────
 
 def plot_confusion_matrices(preds_df: pd.DataFrame, out_dir: Path, fmt: str,
                             source: str = "Holdout"):
@@ -401,9 +435,7 @@ def plot_confusion_matrices(preds_df: pd.DataFrame, out_dir: Path, fmt: str,
     _save(fig, out_dir, "07_confusion_matrices", fmt)
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # Figure 8: CV vs holdout for winning models
-# ─────────────────────────────────────────────────────────────────────────────
 
 def plot_holdout_comparison(
     holdout_clf: pd.DataFrame | None,
@@ -414,14 +446,14 @@ def plot_holdout_comparison(
 ):
     """
     Two-panel figure: left = clf macro-F1 (CV vs holdout), right = reg MAE (CV vs holdout).
-    Confirms generalization: holdout performance is consistent with CV.
+    Shows whether the holdout result is in line with cross-validation.
     """
     CV_COLOR      = "#4C72B0"
     HOLDOUT_COLOR = "#55A868"
 
     fig, axes = plt.subplots(1, 2, figsize=(10, 4.5))
 
-    # ── Left: Classification macro-F1 ─────────────────────────────────────────
+    # Left: Classification macro-F1
     ax = axes[0]
     if holdout_clf is not None and final is not None:
         model_name = holdout_clf["model"].iloc[0]
@@ -445,7 +477,7 @@ def plot_holdout_comparison(
         ax.text(0.5, 0.5, "holdout_report.csv\nnot found",
                 ha="center", va="center", transform=ax.transAxes)
 
-    # ── Right: Regression MAE ─────────────────────────────────────────────────
+    # Right: Regression MAE
     ax = axes[1]
     if holdout_reg is not None and final is not None:
         model_name = holdout_reg["model"].iloc[0]
@@ -478,9 +510,7 @@ def plot_holdout_comparison(
     _save(fig, out_dir, "08_holdout_comparison", fmt)
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # Figure 9: Optuna convergence curves
-# ─────────────────────────────────────────────────────────────────────────────
 
 _MODEL_SHORT = {"rf": "RandomForest", "xgb": "XGBoost", "lgbm": "LightGBM"}
 
@@ -539,9 +569,7 @@ def plot_optuna_convergence(res_dir: Path, out_dir: Path, fmt: str):
     _save(fig, out_dir, "09_optuna_convergence", fmt)
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # Figure 10: Actual vs Predicted scatter (holdout regression)
-# ─────────────────────────────────────────────────────────────────────────────
 
 def plot_actual_vs_predicted(
     reg_preds: pd.DataFrame,
@@ -604,15 +632,13 @@ def plot_actual_vs_predicted(
     _save(fig, out_dir, "10_actual_vs_predicted", fmt)
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # Main
-# ─────────────────────────────────────────────────────────────────────────────
 
 def main(res_dir: Path, out_dir: Path, fmt: str, stage: str = "fe_tuned"):
     _apply_style()
 
-    # tuned_dir: results/<stage>/  — final_results.csv, oof, accuracy_vs_time_tuned
-    # fe_dir:    results/<fe>/     — feature_importance, accuracy_vs_time
+    # tuned_dir: results/<stage>/  - final_results.csv, oof, accuracy_vs_time_tuned
+    # fe_dir:    results/<fe>/     - feature_importance, accuracy_vs_time
     tuned_dir = res_dir / stage
     fe_dir    = res_dir / stage.replace("_tuned", "")
     logger.info("Reading results from %s", tuned_dir)
@@ -620,41 +646,69 @@ def main(res_dir: Path, out_dir: Path, fmt: str, stage: str = "fe_tuned"):
     # Load available data files from the correct stage subdirectories
     final       = _load(tuned_dir, "final_results.csv")
     feat_imp    = _load(fe_dir,    "feature_importance.csv")
-    acc_t       = _load(fe_dir,    "accuracy_vs_time.csv")
-    acc_t_tu    = _load(tuned_dir, "accuracy_vs_time_tuned.csv")
     oof_preds      = _load(tuned_dir, "oof_predictions.csv")
     holdout_preds  = _load(tuned_dir, "holdout_predictions.csv")
     holdout_clf    = _load(tuned_dir, "holdout_report.csv")
     holdout_reg    = _load(tuned_dir, "holdout_regression_report.csv")
     reg_preds      = _load(tuned_dir, "holdout_regression_predictions.csv")
 
-    # ── Figure 1: Stage progression ──────────────────────────────────────────
+    # accuracy/MAE per T is in the tuning folders of each model, not in the gathered stage
+    # folder. The holdout numbers are used when present, otherwise the out-of-fold ones.
+    def _load_concat(dirs_and_file):
+        dfs = [_load(d, f) for d, f in dirs_and_file]
+        dfs = [df for df in dfs if df is not None]
+        return pd.concat(dfs, ignore_index=True) if dfs else None
+
+    acc_t_source = "Holdout"
+    acc_t_tu = _load_concat([
+        (res_dir / "baseline_clf_rf",  "accuracy_vs_time_holdout.csv"),
+        (res_dir / "baseline_clf_xgb", "accuracy_vs_time_holdout.csv"),
+    ])
+    if acc_t_tu is None:
+        acc_t_source = "OOF"
+        acc_t_tu = _load_concat([
+            (res_dir / "baseline_clf_rf",  "accuracy_vs_time_tuned.csv"),
+            (res_dir / "baseline_clf_xgb", "accuracy_vs_time_tuned.csv"),
+        ])
+
+    mae_t_source = "Holdout"
+    mae_t_tu = _load_concat([
+        (res_dir / "fe_reg_rf",  "mae_vs_time_holdout.csv"),
+        (res_dir / "fe_reg_xgb", "mae_vs_time_holdout.csv"),
+    ])
+    if mae_t_tu is None:
+        mae_t_source = "OOF"
+        mae_t_tu = _load_concat([
+            (res_dir / "fe_reg_rf",  "mae_vs_time_tuned.csv"),
+            (res_dir / "fe_reg_xgb", "mae_vs_time_tuned.csv"),
+        ])
+
+    # Figure 1: Stage progression
     if final is not None:
         plot_stage_progression(final, out_dir, fmt)
     else:
         logger.warning("final_results.csv missing — run: python scripts/tune_model.py")
 
-    # ── Figure 2: Per-class F1 heatmap ───────────────────────────────────────
+    # Figure 2: Per-class F1 heatmap
     if final is not None:
         plot_f1_heatmap(final, out_dir, fmt)
 
-    # ── Figure 3: Feature importance ─────────────────────────────────────────
+    # Figure 3: Feature importance
     if feat_imp is not None:
         plot_feature_importance(feat_imp, out_dir, fmt)
 
-    # ── Figure 4: Accuracy vs time-into-fault ────────────────────────────────
-    if acc_t is not None or acc_t_tu is not None:
-        plot_accuracy_vs_time(acc_t, acc_t_tu, out_dir, fmt)
+    # Figure 4: Accuracy vs time-into-fault (tuned classifiers)
+    plot_accuracy_vs_time(acc_t_tu, out_dir, fmt, source=acc_t_source)
 
-    # ── Figure 5: Blast radius MAE ───────────────────────────────────────────
+    # Figure 5: Blast radius MAE
     if final is not None:
         plot_blast_radius_mae(final, out_dir, fmt)
 
-    # ── Figure 6: Full model comparison ──────────────────────────────────────
+    # Figure 6: Full model comparison
     if final is not None:
         plot_full_model_comparison(final, out_dir, fmt)
 
-    # ── Figure 7: Confusion matrices (holdout preferred over OOF) ────────────
+    # Figure 7: Confusion matrices (holdout preferred over OOF)
     if holdout_preds is not None:
         plot_confusion_matrices(holdout_preds, out_dir, fmt, source="Holdout")
     elif oof_preds is not None:
@@ -663,21 +717,24 @@ def main(res_dir: Path, out_dir: Path, fmt: str, stage: str = "fe_tuned"):
     else:
         logger.warning("holdout_predictions.csv missing — run: python scripts/tune_model.py --task clf --eval-only")
 
-    # ── Figure 8: CV vs holdout comparison ───────────────────────────────────
+    # Figure 8: CV vs holdout comparison
     if holdout_clf is not None or holdout_reg is not None:
         plot_holdout_comparison(holdout_clf, holdout_reg, final, out_dir, fmt)
     else:
         logger.warning("holdout_report.csv / holdout_regression_report.csv missing")
 
-    # ── Figure 9: Optuna convergence ─────────────────────────────────────────
+    # Figure 9: Optuna convergence
     plot_optuna_convergence(res_dir, out_dir, fmt)
 
-    # ── Figure 10: Actual vs Predicted scatter (holdout regression) ───────────
+    # Figure 10: Actual vs Predicted scatter (holdout regression)
     if reg_preds is not None:
         plot_actual_vs_predicted(reg_preds, holdout_reg, out_dir, fmt)
     else:
         logger.warning("holdout_regression_predictions.csv missing — run: "
                        "python scripts/tune_model.py --task reg --eval-only")
+
+    # Figure 11: MAE vs time-into-fault (tuned regressors)
+    plot_mae_vs_time(mae_t_tu, out_dir, fmt, source=mae_t_source)
 
     logger.info("\nAll figures saved to %s/", out_dir)
 

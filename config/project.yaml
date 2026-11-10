@@ -1,9 +1,13 @@
-cluster_name: failure-forecast
+# The cluster the dataset was collected on. deployment/online-boutique/install.sh reads the namespace and
+# scripts/report/make_tables.py the zone and node count
+cluster_name: ff-2
+
+gcp_project: direct-variety-500209-n9
+
+zone: us-central1-b
+
+node_pool: e2-pool
+
+node_count: 3
 
 namespace: online-boutique
-
-monitoring_namespace: monitoring
-
-dataset_path: dataset/raw
-
-experiment_path: experiments

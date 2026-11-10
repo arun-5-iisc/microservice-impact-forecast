@@ -1,9 +1,9 @@
 """
-Plot target label distributions for dissertation slides.
+Plots of the label distributions, for the slides and report.
 
 Generates two figures:
-  results/plots/labels_severity.png      — severity class distribution (bar + pie)
-  results/plots/labels_blast_radius.png  — blast_radius_final distribution (histogram + box)
+  results/plots/labels_severity.png      - severity class distribution (bar + pie)
+  results/plots/labels_blast_radius.png  - blast_radius_final distribution (histogram + box)
 
 Usage:
   python scripts/plot_labels.py
@@ -50,7 +50,7 @@ def plot_severity(df_exp: pd.DataFrame, out_dir: Path) -> None:
 
     fig, axes = plt.subplots(1, 2, figsize=(11, 4.5))
 
-    # ── Bar chart ─────────────────────────────────────────────────────────────
+    # Bar chart
     ax = axes[0]
     bars = ax.bar(SEVERITY_ORDER, counts.values, color=colors, edgecolor="white",
                   linewidth=1.5, width=0.55)
@@ -66,7 +66,7 @@ def plot_severity(df_exp: pd.DataFrame, out_dir: Path) -> None:
     ax.spines[["top", "right"]].set_visible(False)
     ax.tick_params(axis="x", labelsize=13)
 
-    # ── Pie chart ─────────────────────────────────────────────────────────────
+    # Pie chart
     ax = axes[1]
     wedge_props = {"linewidth": 2, "edgecolor": "white"}
     _, _, autotexts = ax.pie(
@@ -134,7 +134,7 @@ def main(data_path: Path, out_dir: Path) -> None:
     n_exp = df["experiment_id"].nunique()
     print(f"Dataset: {len(df)} rows  |  {n_exp} experiments  ({n_exp} × 4 snapshots)")
 
-    # Verify that labels are constant per experiment (they should be — both are derived
+    # Verify that labels are constant per experiment (they should be - both are derived
     # from the final 60 s state of the experiment, independent of the T-snapshot)
     inconsistent_sev = df.groupby("experiment_id")["severity"].nunique().gt(1).sum()
     inconsistent_br  = df.groupby("experiment_id")["blast_radius_final"].nunique().gt(1).sum()
@@ -144,9 +144,8 @@ def main(data_path: Path, out_dir: Path) -> None:
     else:
         print("Verified: severity and blast_radius_final are constant across all 4 snapshots per experiment")
 
-    # Plot at row level — the model trains and infers on rows (one per T-snapshot),
-    # not on experiments. 520 rows is the actual ML dataset size.
-    print(f"Plotting with {len(df)} rows (130 experiments × 4 time snapshots)")
+    # plotted per row (one per snapshot), since that is what the model trains on
+    print(f"Plotting with {len(df)} rows ({n_exp} experiments x 4 time snapshots)")
     print(f"Severity counts (rows):\n{df['severity'].value_counts().reindex(SEVERITY_ORDER)}")
     print(f"Blast radius range: {df['blast_radius_final'].min()} – {df['blast_radius_final'].max()}")
 
